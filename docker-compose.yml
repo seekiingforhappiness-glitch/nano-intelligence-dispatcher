@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - AMAP_KEY=${AMAP_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - DEPOT_NAME=${DEPOT_NAME:-江苏金发科技生产基地}
+      - DEPOT_ADDRESS=${DEPOT_ADDRESS:-江苏省苏州市昆山市千灯镇石浦恒升路101号}
+      - DEPOT_LNG=${DEPOT_LNG:-121.2367}
+      - DEPOT_LAT=${DEPOT_LAT:-31.2156}
+      - NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME:-纳米智能排线助手}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# 如果需要 Redis 缓存（可选）
+# services:
+#   redis:
+#     image: redis:7-alpine
+#     ports:
+#       - "6379:6379"
+#     volumes:
+#       - redis_data:/data
+#     restart: unless-stopped
+
+# volumes:
+#   redis_data:
+
+

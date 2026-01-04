@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "users": [
+    {
+      "id": "32e01456-00cb-4c97-8fbc-55da3eb180a1",
+      "username": "admin",
+      "role": "admin",
+      "password": {
+        "algo": "pbkdf2_sha256",
+        "iterations": 210000,
+        "saltBase64": "JI2fU/ofH9tpdbRD139JlA==",
+        "hashBase64": "EgmMgcATmrGziah+JwJN7K1JNXT5ERz+e9N41BXO3qs="
+      },
+      "enabled": true,
+      "createdAt": "2026-01-04T01:19:04.396Z",
+      "updatedAt": "2026-01-04T10:52:04.251Z",
+      "lastLoginAt": "2026-01-04T10:52:04.251Z"
+    },
+    {
+      "id": "c1a32acd-c6fa-4e58-b9db-05a672b8fd6a",
+      "username": "nami",
+      "role": "operator",
+      "password": {
+        "algo": "pbkdf2_sha256",
+        "iterations": 210000,
+        "saltBase64": "xJLe/EfzAf6PoLuRSiGthw==",
+        "hashBase64": "7hP+d8JOJZwuLt+AqYFrp7euQnVtK3UGePjytTt6Uic="
+      },
+      "enabled": true,
+      "createdAt": "2026-01-04T01:19:49.091Z",
+      "updatedAt": "2026-01-04T10:55:08.290Z"
+    }
+  ]
+}

@@ -1,0 +1,398 @@
+import { v4 as uuidv4 } from 'uuid';
+import { Order, CleanedOrder } from '@/types/order';
+import { VehicleConfig, CostMode } from '@/types/vehicle';
+import {
+  Trip,
+  TripStop,
+  ScheduleResult,
+  ScheduleSummary,
+  ScheduleProgress,
+  ScheduleOptions,
+} from '@/types/schedule';
+import { parseConstraints } from '@/lib/parser/constraints';
+import { geocodeAddress, batchGeocode } from '@/lib/amap/client';
+import { haversineDistance, estimateRoadDistance, estimateDuration } from '@/lib/utils/haversine';
+import { clusterOrders } from './clustering';
+import { optimizeRoute, calculateTotalDistance, calculateSegmentDistances } from './routing';
+import { packTrips, TempTrip } from './binPacking';
+import { selectVehicle } from './vehicleSelection';
+
+export type ProgressCallback = (progress: ScheduleProgress) => void;
+
+/**
+ * 调度选项的默认值
+ */
+const DEFAULT_OPTIONS: ScheduleOptions = {
+  maxStops: 8,
+  startTime: '06:00',
+  deadline: '20:00',
+  factoryDeadline: '17:00',
+  costMode: 'mileage',
+  showMarketReference: true,
+};
+
+/**
+ * 主调度函数
+ */
+export async function scheduleOrders(
+  cleanedOrders: CleanedOrder[],
+  depotCoord: { lng: number; lat: number },
+  vehicles: VehicleConfig[],
+  options: Partial<ScheduleOptions> = {},
+  onProgress?: ProgressCallback
+): Promise<ScheduleResult> {
+  const taskId = uuidv4();
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+
+  const reportProgress = (stage: number, stageName: string, percent: number, message: string) => {
+    onProgress?.({
+      taskId,
+      stage,
+      stageName,
+      percent,
+      message,
+    });
+  };
+
+  try {
+    // ===== 诊断日志 =====
+    console.log('📊 调度开始 - 输入订单数:', cleanedOrders.length);
+    console.log('📊 有效订单数:', cleanedOrders.filter(o => o.isValid).length);
+    console.log('📊 无效订单原因:', cleanedOrders.filter(o => !o.isValid).map(o => ({
+      row: o.rowIndex,
+      errors: o.cleaningErrors,
+      address: o.address?.substring(0, 20),
+      weight: o.weightKg,
+    })));
+
+    // ===== 阶段 1: 解析约束 =====
+    reportProgress(1, '解析运输要求', 10, '正在解析运输约束...');
+    
+    const ordersWithConstraints: Order[] = cleanedOrders
+      .filter(o => o.isValid)
+      .map(o => ({
+        ...o,
+        constraints: parseConstraints(o.requirementsRaw, o.packageSize),
+        coordinates: null,
+        geocodeSource: 'failed' as const,
+        effectivePalletSlots: 1, // 暂时默认
+      }));
+
+    const fallbackEndTime = opts.factoryDeadline || opts.deadline;
+
+    // 计算有效托盘位（考虑堆叠）并注入默认时间窗
+    for (const order of ordersWithConstraints) {
+      // 简化计算：按重量估算托盘位，不可堆叠则翻倍
+      const basePallets = Math.ceil(order.weightKg / 1000); // 每吨约1个托盘位
+      order.effectivePalletSlots = order.constraints.noStack ? basePallets * 2 : basePallets;
+
+      if (!order.constraints.timeWindow) {
+        order.constraints.timeWindow = {
+          start: opts.startTime,
+          end: fallbackEndTime,
+        };
+      }
+    }
+
+    reportProgress(1, '解析运输要求', 20, `已解析 ${ordersWithConstraints.length} 个订单的约束`);
+
+    // ===== 阶段 2: 地址解析 =====
+    reportProgress(2, '地址解析', 25, '正在获取地址坐标...');
+
+    const addresses = ordersWithConstraints.map(o => o.address);
+    const { results: geocodeResults, cacheHits } = await batchGeocode(addresses, (current, total, meta) => {
+      const percent = 25 + Math.round((current / total) * 25);
+      const cacheNote = meta && meta.cacheHits > 0 ? `（缓存 ${meta.cacheHits}）` : '';
+      reportProgress(2, '地址解析', percent, `正在解析地址 ${current}/${total}${cacheNote}`);
+    });
+
+    // 更新订单坐标
+    let geocodeSuccess = 0;
+    for (const order of ordersWithConstraints) {
+      const result = geocodeResults.get(order.address);
+      if (result?.success) {
+        order.coordinates = { lng: result.lng, lat: result.lat };
+        order.geocodeSource = result.source;
+        order.formattedAddress = result.formattedAddress;
+        order.distanceFromDepot = haversineDistance(
+          depotCoord.lat, depotCoord.lng,
+          result.lat, result.lng
+        );
+        geocodeSuccess++;
+      } else {
+        order.geocodeSource = 'failed';
+        order.cleaningWarnings.push('地址解析失败：' + (result?.error || '未知错误'));
+      }
+    }
+
+    reportProgress(
+      2,
+      '地址解析',
+      50,
+      `地址解析完成，成功 ${geocodeSuccess}/${ordersWithConstraints.length}${
+        cacheHits > 0 ? `（缓存命中 ${cacheHits}）` : ''
+      }`
+    );
+    
+    console.log('📍 地址解析结果:', {
+      total: ordersWithConstraints.length,
+      success: geocodeSuccess,
+      failed: ordersWithConstraints.length - geocodeSuccess,
+      failedAddresses: ordersWithConstraints
+        .filter(o => !o.coordinates)
+        .map(o => o.address?.substring(0, 30))
+        .slice(0, 5),
+    });
+
+    // 过滤掉无法解析地址的订单
+    const validOrders = ordersWithConstraints.filter(o => o.coordinates);
+    const invalidOrders = ordersWithConstraints.filter(o => !o.coordinates);
+    
+    console.log('🚛 可排线订单数:', validOrders.length);
+
+    // ===== 阶段 3: 分组 =====
+    reportProgress(3, '区域分组', 55, '正在按区域分组...');
+
+    const clusters = clusterOrders(validOrders, depotCoord);
+    reportProgress(3, '区域分组', 60, `已分为 ${clusters.length} 个区域组`);
+
+    // ===== 阶段 4: 装箱与路径优化 =====
+    reportProgress(4, '排线优化', 65, '正在生成车次...');
+
+    const allTrips: Trip[] = [];
+    let tripIndex = 1;
+
+    for (const cluster of clusters) {
+      // 装箱
+      const tempTrips = packTrips(cluster.orders, opts.maxStops, vehicles);
+
+      for (const tempTrip of tempTrips) {
+        // 路径优化
+        const optimizedOrders = optimizeRoute(tempTrip.orders, depotCoord);
+
+        // 计算距离
+        const totalDistance = estimateRoadDistance(
+          calculateTotalDistance(optimizedOrders, depotCoord)
+        );
+        const segmentDistances = calculateSegmentDistances(optimizedOrders, depotCoord);
+
+        // 选择车型
+        const vehicleResult = selectVehicle(
+          tempTrip,
+          vehicles,
+          totalDistance,
+          opts.costMode as CostMode
+        );
+
+        // 生成停靠点
+        const stops: TripStop[] = [];
+        let cumulativeDistance = 0;
+        let cumulativeDuration = 0;
+        const [startHour, startMin] = opts.startTime.split(':').map(Number);
+        let currentTime = startHour * 60 + startMin; // 分钟
+
+        for (let i = 0; i < optimizedOrders.length; i++) {
+          const order = optimizedOrders[i];
+          const segmentDist = estimateRoadDistance(segmentDistances[i] || 0);
+          const segmentDur = estimateDuration(segmentDist) * 60; // 转分钟
+
+          cumulativeDistance += segmentDist;
+          cumulativeDuration += segmentDur;
+          currentTime += segmentDur;
+
+          // 检查时间窗
+          const deadlineMin = parseTime(opts.deadline);
+          const isOnTime = currentTime <= deadlineMin;
+          const timeWindow = order.constraints.timeWindow;
+          let delayMinutes: number | undefined;
+
+          if (timeWindow) {
+            const windowEnd = parseTime(timeWindow.end);
+            if (currentTime > windowEnd) {
+              delayMinutes = currentTime - windowEnd;
+            }
+          }
+
+          stops.push({
+            sequence: i + 1,
+            order,
+            eta: formatTime(currentTime),
+            etd: formatTime(currentTime + 30), // 假设每站停留30分钟
+            distanceFromPrev: segmentDist,
+            durationFromPrev: segmentDur / 60, // 转小时
+            cumulativeDistance,
+            cumulativeDuration: cumulativeDuration / 60,
+            isOnTime: isOnTime && !delayMinutes,
+            delayMinutes,
+          });
+
+          currentTime += 30; // 停留时间
+        }
+
+        // 计算返回时间
+        const lastOrder = optimizedOrders[optimizedOrders.length - 1];
+        const returnDistance = lastOrder?.coordinates
+          ? estimateRoadDistance(haversineDistance(
+              lastOrder.coordinates.lat, lastOrder.coordinates.lng,
+              depotCoord.lat, depotCoord.lng
+            ))
+          : 0;
+        const returnDuration = estimateDuration(returnDistance) * 60;
+        currentTime += returnDuration;
+
+        const trip: Trip = {
+          tripId: `T${String(tripIndex++).padStart(3, '0')}`,
+          vehicleType: vehicleResult.vehicle.name,
+          stops,
+          departureTime: opts.startTime,
+          returnTime: formatTime(currentTime),
+          totalDistance: cumulativeDistance + returnDistance,
+          totalDuration: (cumulativeDuration + returnDuration) / 60,
+          totalWeightKg: tempTrip.totalWeightKg,
+          totalPalletSlots: tempTrip.totalPalletSlots,
+          loadRateWeight: vehicleResult.loadRateWeight,
+          loadRatePallet: vehicleResult.loadRatePallet,
+          estimatedCost: vehicleResult.cost,
+          costBreakdown: vehicleResult.costBreakdown,
+          isValid: stops.every(s => s.isOnTime),
+          hasRisk: stops.some(s => !s.isOnTime),
+          riskStops: stops.filter(s => !s.isOnTime).map(s => s.sequence),
+          reason: vehicleResult.reason,
+        };
+
+        allTrips.push(trip);
+      }
+
+      const progress = 65 + Math.round((clusters.indexOf(cluster) / clusters.length) * 25);
+      reportProgress(4, '排线优化', progress, `已处理 ${clusters.indexOf(cluster) + 1}/${clusters.length} 个区域`);
+    }
+
+    reportProgress(4, '排线优化', 90, `生成 ${allTrips.length} 个车次`);
+
+    // ===== 阶段 5: 生成汇总 =====
+    reportProgress(5, '生成报告', 95, '正在生成汇总报告...');
+
+    const summary = generateSummary(allTrips, ordersWithConstraints, invalidOrders);
+
+    reportProgress(5, '生成报告', 100, '排线完成！');
+
+    return {
+      taskId,
+      status: 'completed',
+      trips: allTrips,
+      summary,
+      createdAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      taskId,
+      status: 'failed',
+      trips: [],
+      summary: createEmptySummary(),
+      createdAt: new Date().toISOString(),
+      error: (error as Error).message,
+    };
+  }
+}
+
+/**
+ * 解析时间字符串为分钟
+ */
+function parseTime(timeStr: string): number {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  return hours * 60 + (minutes || 0);
+}
+
+/**
+ * 格式化分钟为时间字符串
+ */
+function formatTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = Math.round(minutes % 60);
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+/**
+ * 生成调度汇总
+ */
+function generateSummary(
+  trips: Trip[],
+  allOrders: Order[],
+  invalidOrders: Order[]
+): ScheduleSummary {
+  const vehicleBreakdown: Record<string, number> = {};
+  for (const trip of trips) {
+    vehicleBreakdown[trip.vehicleType] = (vehicleBreakdown[trip.vehicleType] || 0) + 1;
+  }
+
+  const totalCost = trips.reduce((sum, t) => sum + t.estimatedCost, 0);
+  const totalDistance = trips.reduce((sum, t) => sum + t.totalDistance, 0);
+  const totalDuration = trips.reduce((sum, t) => sum + t.totalDuration, 0);
+
+  const riskOrders = trips
+    .flatMap(t => t.stops.filter(s => !s.isOnTime).map(s => s.order.orderId));
+
+  return {
+    totalOrders: allOrders.length,
+    totalTrips: trips.length,
+    totalDistance: Math.round(totalDistance),
+    totalDuration: Math.round(totalDuration * 10) / 10,
+    totalCost: Math.round(totalCost),
+    costBreakdown: {
+      fuel: Math.round(totalCost * 0.4),
+      toll: Math.round(totalCost * 0.3),
+      labor: Math.round(totalCost * 0.3),
+      other: 0,
+    },
+    avgLoadRateWeight: trips.length > 0
+      ? trips.reduce((sum, t) => sum + t.loadRateWeight, 0) / trips.length
+      : 0,
+    avgLoadRatePallet: trips.length > 0
+      ? trips.reduce((sum, t) => sum + t.loadRatePallet, 0) / trips.length
+      : 0,
+    vehicleBreakdown,
+    riskOrders,
+    invalidOrders: invalidOrders.map(o => o.orderId),
+    constraintsSummary: {
+      flyingWingRequired: allOrders.filter(o => o.constraints.requiredVehicleType === '飞翼').length,
+      weekendExcluded: allOrders.filter(o => o.constraints.excludeSunday || o.constraints.excludeSaturday).length,
+      noStackOrders: allOrders.filter(o => o.constraints.noStack).length,
+      mustBeLastOrders: allOrders.filter(o => o.constraints.mustBeLast).length,
+      singleTripOrders: allOrders.filter(o => o.constraints.singleTripOnly).length,
+    },
+  };
+}
+
+/**
+ * 创建空汇总
+ */
+function createEmptySummary(): ScheduleSummary {
+  return {
+    totalOrders: 0,
+    totalTrips: 0,
+    totalDistance: 0,
+    totalDuration: 0,
+    totalCost: 0,
+    costBreakdown: { fuel: 0, toll: 0, labor: 0, other: 0 },
+    avgLoadRateWeight: 0,
+    avgLoadRatePallet: 0,
+    vehicleBreakdown: {},
+    riskOrders: [],
+    invalidOrders: [],
+    constraintsSummary: {
+      flyingWingRequired: 0,
+      weekendExcluded: 0,
+      noStackOrders: 0,
+      mustBeLastOrders: 0,
+      singleTripOrders: 0,
+    },
+  };
+}
+
+export { clusterOrders } from './clustering';
+export { optimizeRoute } from './routing';
+export { packTrips } from './binPacking';
+export { selectVehicle } from './vehicleSelection';
+
+
