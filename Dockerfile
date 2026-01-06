@@ -1,6 +1,9 @@
-FROM node:18-slim AS base
+# ======================
+# 基础镜像：Node 20（必须）
+# ======================
+FROM node:20-slim AS base
 
-# 给 node-gyp 用
+# node-gyp 必需依赖
 RUN apt-get update && \
     apt-get install -y python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
@@ -41,7 +44,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN groupadd --gid 1001 nodejs && \
     useradd --uid 1001 --gid nodejs --system nextjs
 
-# ❌ 不再复制 public（因为你没有）
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
