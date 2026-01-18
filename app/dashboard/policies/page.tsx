@@ -79,8 +79,8 @@ function TabButton({
         <button
             onClick={onClick}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${active
-                    ? 'bg-primary/20 text-primary border border-primary/30'
-                    : 'text-dark-400 hover:bg-dark-800 hover:text-white border border-transparent'
+                ? 'bg-primary/20 text-primary border border-primary/30'
+                : 'text-dark-400 hover:bg-dark-800 hover:text-white border border-transparent'
                 }`}
         >
             <Icon className="w-4 h-4" />
@@ -134,7 +134,7 @@ function RouteTemplateSection() {
                     <div>
                         <h3 className="text-white font-medium mb-1">路线模板</h3>
                         <p className="text-dark-400 text-sm">
-                            预定义客户访问顺序，适用于固定配送线路。例如：每周一固定走"仓库→A客户→B客户→C客户"路线。
+                            预定义客户访问顺序，适用于固定配送线路。例如：每周一固定走仓库→A客户→B客户→C客户路线。
                         </p>
                     </div>
                 </div>
@@ -162,7 +162,7 @@ function PriorityRuleSection() {
                     <div>
                         <h3 className="text-white font-medium mb-1">优先级规则</h3>
                         <p className="text-dark-400 text-sm">
-                            根据订单属性自动设置优先级。例如：VIP 客户订单自动标记为"加急"，优先安排配送。
+                            根据订单属性自动设置优先级。例如：VIP 客户订单自动标记为加急，优先安排配送。
                         </p>
                     </div>
                 </div>
