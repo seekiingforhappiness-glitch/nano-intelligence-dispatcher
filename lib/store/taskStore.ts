@@ -93,7 +93,7 @@ export async function listTasks(): Promise<Array<{ taskId: string } & TaskRecord
     take: 50
   });
 
-  return tasks.map(task => ({
+  return tasks.map((task: any) => ({
     taskId: task.id,
     status: task.status as TaskStatus,
     progress: task.progress as unknown as ScheduleProgress | null,
