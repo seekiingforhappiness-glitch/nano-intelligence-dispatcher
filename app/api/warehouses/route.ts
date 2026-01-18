@@ -21,9 +21,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const admin = getAdminFromRequest(request);
-  if (!admin) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // 使用 admin 的 organizationId 或默认值
+  const orgId = admin?.organizationId || 'demo-org-001';
+
   try {
     const body = (await request.json()) as WarehouseInput;
     if (!body.name || !body.address) {
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 显式传递组织 ID
-    const warehouse = await createWarehouse(body, admin.organizationId);
+    const warehouse = await createWarehouse(body, orgId);
     return NextResponse.json({ warehouse });
   } catch (error) {
     console.error('创建仓库失败', error);
