@@ -2,7 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { Users, Search, Plus, Filter, Phone, Loader2 } from 'lucide-react';
-import { Driver } from '@prisma/client';
+
+// 本地 Driver 类型定义（避免依赖 Prisma 生成的类型）
+interface Driver {
+    id: string;
+    name: string;
+    phone?: string | null;
+    licenseType?: string | null;
+    status: string;
+    createdAt: string;
+}
 
 export default function DriversPage() {
     const [searchTerm, setSearchTerm] = useState('');
@@ -111,8 +120,8 @@ export default function DriversPage() {
                                 <div className="col-span-1 text-slate-400 text-sm">{driver.licenseType || '普通'}</div>
                                 <div className="col-span-1">
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${driver.status === 'active' || driver.status === 'idle'
-                                            ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                                            : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                                        ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                                        : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
                                         }`}>
                                         <span className={`w-1.5 h-1.5 rounded-full ${driver.status === 'active' || driver.status === 'idle' ? 'bg-green-400' : 'bg-slate-400'
                                             }`}></span>

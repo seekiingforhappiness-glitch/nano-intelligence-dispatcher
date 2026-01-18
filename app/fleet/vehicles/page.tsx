@@ -2,7 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { Truck, Search, Plus, Filter, Loader2 } from 'lucide-react';
-import { Vehicle } from '@prisma/client';
+
+// 本地 Vehicle 类型定义（避免依赖 Prisma 生成的类型）
+interface Vehicle {
+    id: string;
+    plateNumber: string;
+    vehicleType?: string | null;
+    capacityWeight?: number | null;
+    capacityVolume?: number | null;
+    status: string;
+}
 
 export default function VehiclesPage() {
     const [searchTerm, setSearchTerm] = useState('');
