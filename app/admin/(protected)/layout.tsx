@@ -20,7 +20,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
           <div className="flex items-center gap-3">
             <Link
-              href="/"
+              href="/dashboard/tasks"
               className="px-4 py-2 rounded-lg bg-dark-700 text-white hover:bg-dark-600"
             >
               返回排线
