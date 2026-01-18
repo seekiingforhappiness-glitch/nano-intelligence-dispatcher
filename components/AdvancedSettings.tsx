@@ -1,9 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Settings, Info, Trash2, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Settings, Info, Trash2, Plus, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VehicleConfig } from '@/types/vehicle';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
+import { Badge } from '@/components/ui/Badge';
 
 interface AdvancedSettingsProps {
   options: {
@@ -11,6 +16,7 @@ interface AdvancedSettingsProps {
     startTime: string;
     deadline: string;
     factoryDeadline: string;
+    unloadingMinutes: number;
     costMode: string;
   };
   onOptionsChange: (options: AdvancedSettingsProps['options']) => void;
@@ -35,7 +41,7 @@ export function AdvancedSettings({
       const next = String(value).trim();
       const safe = timeRegex.test(next) ? next : (options[key] as string);
       const merged = { ...options, [key]: safe };
-      // 规则：司机硬截止 >= 工厂最晚送货（避免出现“司机下班但工厂还没关门”的混淆配置）
+      // 规则：司机硬截止 >= 工厂最晚送货
       if (key === 'deadline' && timeRegex.test(merged.factoryDeadline) && merged.deadline < merged.factoryDeadline) {
         merged.deadline = merged.factoryDeadline;
       }
@@ -90,104 +96,102 @@ export function AdvancedSettings({
   };
 
   return (
-    <div className="bg-dark-800/30 border border-dark-700 rounded-xl overflow-hidden">
+    <Card variant="glass" className="overflow-hidden">
       {/* 折叠头部 */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-dark-700/30 transition-colors"
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors text-left"
       >
-        <div className="flex items-center gap-2">
-          <Settings className="w-5 h-5 text-primary-500" />
-          <span className="text-white font-medium">高级设置</span>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-primary/10 rounded-lg text-primary">
+            <Settings className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-white font-medium block">高级配置参数</span>
+            <span className="text-slate-500 text-xs">调整调度算法约束、时间窗及车型数据</span>
+          </div>
         </div>
         {isExpanded ? (
-          <ChevronUp className="w-5 h-5 text-dark-400" />
+          <ChevronUp className="w-5 h-5 text-slate-400" />
         ) : (
-          <ChevronDown className="w-5 h-5 text-dark-400" />
+          <ChevronDown className="w-5 h-5 text-slate-400" />
         )}
       </button>
 
       {/* 展开内容 */}
       {isExpanded && (
-        <div className="p-4 pt-0 space-y-4 animate-fade-in">
-          {/* 基础参数 */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-dark-300 text-sm mb-1.5">最大串点数</label>
-              <input
-                type="number"
-                value={options.maxStops}
-                onChange={e => handleOptionChange('maxStops', parseInt(e.target.value) || 8)}
-                min={1}
-                max={20}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg
-                  text-white focus:outline-none focus:border-primary-500 transition-colors"
-              />
-            </div>
+        <div className="p-6 pt-0 space-y-8 animate-fade-in border-t border-white/5 mt-2">
 
-            <div>
-              <label className="block text-dark-300 text-sm mb-1.5">发车时间</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="06:00"
-                value={options.startTime}
-                onChange={e => handleOptionChange('startTime', e.target.value)}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg
-                  text-white focus:outline-none focus:border-primary-500 transition-colors"
-              />
-            </div>
+          {/* Section: 基础约束 */}
+          <div className="space-y-4 pt-4">
+            <h4 className="text-sm font-semibold text-white/90 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-yellow-500" />
+              基础约束与时间窗
+            </h4>
 
-            <div>
-              <label className="block text-dark-300 text-sm mb-1.5">司机最晚收车（硬截止）</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="20:00"
-                value={options.deadline}
-                onChange={e => handleOptionChange('deadline', e.target.value)}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg
-                  text-white focus:outline-none focus:border-primary-500 transition-colors"
-              />
-              <p className="text-xs text-dark-500 mt-1">
-                用于标记全局超时（例如司机工作时长）；通常应晚于工厂最晚送货
-              </p>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="space-y-2">
+                <Label>最大串点数</Label>
+                <Input
+                  type="number"
+                  value={options.maxStops}
+                  onChange={e => handleOptionChange('maxStops', parseInt(e.target.value) || 8)}
+                  min={1}
+                  max={20}
+                />
+                <p className="text-[10px] text-slate-500">单车次最大允许配送的站点数量</p>
+              </div>
 
-            <div>
-              <label className="block text-dark-300 text-sm mb-1.5">工厂最晚送货</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="17:00"
-                value={options.factoryDeadline}
-                onChange={e => handleOptionChange('factoryDeadline', e.target.value)}
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg
-                  text-white focus:outline-none focus:border-primary-500 transition-colors"
-              />
-              <p className="text-xs text-dark-500 mt-1">
-                未在文档中注明时间窗的订单，会使用该时间作为默认最晚送货时间
-              </p>
+              <div className="space-y-2">
+                <Label>每站卸货时间 (min)</Label>
+                <Input
+                  type="number"
+                  value={options.unloadingMinutes}
+                  onChange={e => handleOptionChange('unloadingMinutes', parseInt(e.target.value) || 30)}
+                  min={5}
+                  max={120}
+                  step={5}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>司机最晚收车</Label>
+                <Input
+                  type="time"
+                  value={options.deadline}
+                  onChange={e => handleOptionChange('deadline', e.target.value)}
+                />
+                <p className="text-[10px] text-slate-500">超出此时限将触发风险预警</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>工厂最晚送货</Label>
+                <Input
+                  type="time"
+                  value={options.factoryDeadline}
+                  onChange={e => handleOptionChange('factoryDeadline', e.target.value)}
+                />
+              </div>
             </div>
           </div>
 
-          {/* 成本模式 */}
-          <div>
-            <label className="block text-dark-300 text-sm mb-1.5">成本计算模式</label>
+          {/* Section: 成本模式 */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-white/90">成本计算模式</h4>
             <div className="flex flex-wrap gap-2">
               {[
-                { value: 'mileage', label: '起步价+里程' },
-                { value: 'fixed', label: '固定价格' },
-                { value: 'hybrid', label: '混合模式' },
+                { value: 'mileage', label: '起步价 + 里程计费' },
+                { value: 'fixed', label: '一口价模式' },
+                { value: 'hybrid', label: '混合计价' },
               ].map(mode => (
                 <button
                   key={mode.value}
                   onClick={() => handleOptionChange('costMode', mode.value)}
                   className={cn(
-                    'px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                    'px-4 py-2 rounded-lg text-sm font-medium transition-all border',
                     options.costMode === mode.value
-                      ? 'bg-primary-500 text-dark-900'
-                      : 'bg-dark-700 text-dark-300 hover:bg-dark-600'
+                      ? 'bg-primary/20 border-primary/30 text-primary shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+                      : 'bg-black/20 border-white/10 text-slate-400 hover:bg-white/5 hover:border-white/20'
                   )}
                 >
                   {mode.label}
@@ -196,145 +200,130 @@ export function AdvancedSettings({
             </div>
           </div>
 
-          {/* 车型配置 */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-dark-300 text-sm">车型配置</label>
-              <button
+          {/* Section: 车型配置 */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-white/90">车型资源池</h4>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowVehicleConfig(!showVehicleConfig)}
-                className="text-primary-400 text-sm hover:underline"
               >
-                {showVehicleConfig ? '收起' : '展开配置'}
-              </button>
+                {showVehicleConfig ? '收起配置' : '展开详细配置'}
+              </Button>
             </div>
 
             {!showVehicleConfig && (
               <div className="flex flex-wrap gap-2">
                 {vehicles.filter(v => v.enabled).map(v => (
-                  <span
-                    key={v.id}
-                    className="px-3 py-1 bg-dark-700 rounded-lg text-sm text-dark-300"
-                  >
+                  <Badge key={v.id} variant="tech" className="px-3 py-1">
                     {v.name}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             )}
 
             {showVehicleConfig && (
-              <div className="bg-dark-700/50 rounded-lg p-4 space-y-4 mt-2">
+              <div className="space-y-3 animate-fade-in">
                 {vehicles.map(vehicle => (
                   <div
                     key={vehicle.id}
                     className={cn(
-                      'rounded-lg border p-3 space-y-3 transition-all',
-                      vehicle.enabled ? 'border-dark-500 bg-dark-600/70' : 'border-dark-700 bg-dark-700/40 opacity-80'
+                      'rounded-xl border p-4 transition-all space-y-4',
+                      vehicle.enabled
+                        ? 'border-primary/20 bg-primary/[0.03]'
+                        : 'border-white/5 bg-black/20 opacity-60 grayscale'
                     )}
                   >
-                    <div className="grid md:grid-cols-4 gap-3">
-                      <div>
-                        <label className="text-xs text-dark-300">车型名称</label>
-                        <input
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.name}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'name', e.target.value)}
-                        />
+                    {/* Compact Row for Name, Type, Toggle, Delete */}
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase tracking-wider">车型名称</Label>
+                          <Input
+                            value={vehicle.name}
+                            onChange={e => handleVehicleFieldChange(vehicle.id, 'name', e.target.value)}
+                            className="h-8 bg-black/40"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase tracking-wider">类别</Label>
+                          <select
+                            className="w-full h-8 px-2 bg-black/40 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-primary/50"
+                            value={vehicle.category}
+                            onChange={e => handleVehicleFieldChange(vehicle.id, 'category', e.target.value)}
+                          >
+                            {vehicleCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase tracking-wider">载重 (kg)</Label>
+                          <Input
+                            type="number"
+                            value={vehicle.maxWeightKg}
+                            onChange={e => handleVehicleFieldChange(vehicle.id, 'maxWeightKg', e.target.value)}
+                            className="h-8 bg-black/40 font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase tracking-wider">里程价 (元/km)</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            value={vehicle.pricePerKm}
+                            onChange={e => handleVehicleFieldChange(vehicle.id, 'pricePerKm', e.target.value)}
+                            className="h-8 bg-black/40 font-mono"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-xs text-dark-300">车型类别</label>
-                        <select
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.category}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'category', e.target.value)}
-                        >
-                          {vehicleCategories.map(category => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-dark-300">最大载重(kg)</label>
-                        <input
-                          type="number"
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.maxWeightKg}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'maxWeightKg', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-dark-300">托盘位</label>
-                        <input
-                          type="number"
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.palletSlots}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'palletSlots', e.target.value)}
-                        />
-                      </div>
-                    </div>
 
-                    <div className="grid md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-xs text-dark-300">起步价(元)</label>
-                        <input
-                          type="number"
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.basePrice}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'basePrice', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-dark-300">里程单价(元/km)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          className="w-full px-3 py-2 mt-1 bg-dark-800 border border-dark-600 rounded-lg text-white focus:border-primary-500"
-                          value={vehicle.pricePerKm}
-                          onChange={e => handleVehicleFieldChange(vehicle.id, 'pricePerKm', e.target.value)}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between mt-6">
-                        <label className="flex items-center gap-2 text-sm text-dark-300">
+                      <div className="flex items-center gap-3 pl-4 border-l border-white/10">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${vehicle.enabled ? 'bg-primary border-primary' : 'border-slate-500 bg-transparent'}`}>
+                            {vehicle.enabled && <Plus className="w-3 h-3 text-black rotate-45" />}
+                          </div>
                           <input
                             type="checkbox"
+                            className="hidden"
                             checked={vehicle.enabled}
                             onChange={() => handleVehicleToggle(vehicle.id)}
-                            className="w-4 h-4 accent-primary-500"
                           />
-                          本次排线启用
+                          <span className="text-xs font-medium text-slate-400 group-hover:text-slate-200">启用</span>
                         </label>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10"
                           onClick={() => handleVehicleDelete(vehicle.id)}
-                          className="text-red-400 text-sm flex items-center gap-1 hover:text-red-300"
                         >
                           <Trash2 className="w-4 h-4" />
-                          删除
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
                 ))}
 
-                <div className="flex flex-wrap items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs text-dark-500">
-                    <Info className="w-4 h-4" />
-                    <span>取消勾选或删除的车型在本次排线中不会使用</span>
+                <div className="flex items-center justify-between pt-2">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>系统将根据订单总量自动从启用车型中匹配最优组合</span>
                   </div>
-                  <button
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     onClick={handleVehicleAdd}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-dark-600 hover:bg-dark-500 text-white transition-all"
+                    className="gap-2"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-3.5 h-3.5" />
                     新增车型
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 

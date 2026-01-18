@@ -9,6 +9,7 @@ export type AdminRole = 'admin' | 'operator' | 'viewer';
 export interface AdminUser {
   id: string;
   username: string;
+  organizationId: string;
   role: AdminRole;
   password: PasswordHash;
   enabled: boolean;
@@ -53,6 +54,7 @@ export async function ensureBootstrapAdmin(): Promise<void> {
   const user: AdminUser = {
     id: crypto.randomUUID(),
     username,
+    organizationId: 'demo-org-001',
     role: 'admin',
     password: hashPassword(password),
     enabled: true,
@@ -99,6 +101,7 @@ export async function createAdminUser(input: {
   const user: AdminUser = {
     id: crypto.randomUUID(),
     username,
+    organizationId: 'demo-org-001', // TODO: allow specifying orgId
     role: input.role,
     password: hashPassword(input.password),
     enabled: true,

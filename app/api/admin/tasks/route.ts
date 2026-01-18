@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 
-  const tasks = listTasks().map((t) => ({
+  const tasks = (await listTasks()).map((t) => ({
     taskId: t.taskId,
     status: t.status,
     createdAt: t.createdAt,
@@ -19,11 +19,11 @@ export async function GET(request: NextRequest) {
     meta: t.meta || null,
     progress: t.progress
       ? {
-          stage: t.progress.stage,
-          stageName: t.progress.stageName,
-          percent: t.progress.percent,
-          message: t.progress.message,
-        }
+        stage: t.progress.stage,
+        stageName: t.progress.stageName,
+        percent: t.progress.percent,
+        message: t.progress.message,
+      }
       : null,
   }));
 

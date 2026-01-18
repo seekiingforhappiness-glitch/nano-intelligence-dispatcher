@@ -3,6 +3,8 @@
 import { useState, useCallback, useRef } from 'react';
 import { Upload, FileSpreadsheet, X, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 interface FileUploaderProps {
   onFileSelect: (file: File) => void;
@@ -52,7 +54,6 @@ export function FileUploader({
       if (file) {
         onFileSelect(file);
       }
-      // 允许用户再次选择同一个文件（否则同文件二次选择不会触发 onChange）
       e.target.value = '';
     },
     [onFileSelect]
@@ -65,42 +66,44 @@ export function FileUploader({
 
   if (uploadedFile) {
     return (
-      <div className="relative bg-dark-800/50 border border-primary-500/30 rounded-xl p-6">
+      <Card variant="glass" className="p-6 border-emerald-500/20 bg-emerald-500/5">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-primary-500/20 rounded-lg flex items-center justify-center">
-            <FileSpreadsheet className="w-6 h-6 text-primary-500" />
+          <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+            <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-white font-medium">{uploadedFile.name}</span>
-              <CheckCircle className="w-4 h-4 text-green-500" />
+              <span className="text-white font-medium tracking-wide">{uploadedFile.name}</span>
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-dark-400 text-sm">
-              已识别 <span className="text-primary-400">{uploadedFile.rowCount}</span> 条订单数据
+            <p className="text-slate-400 text-sm mt-0.5">
+              已识别 <span className="text-emerald-400 font-mono font-bold mx-1">{uploadedFile.rowCount}</span> 条订单数据
             </p>
           </div>
           {onClear && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onClear}
-              className="p-2 hover:bg-dark-700 rounded-lg transition-colors"
+              className="hover:bg-red-500/10 hover:text-red-400 transition-colors"
             >
-              <X className="w-5 h-5 text-dark-400 hover:text-white" />
-            </button>
+              <X className="w-5 h-5" />
+            </Button>
           )}
         </div>
-      </div>
+      </Card>
     );
   }
 
   return (
     <div
       className={cn(
-        'relative border-2 border-dashed rounded-xl p-8 transition-all duration-300',
-        'flex flex-col items-center justify-center gap-4',
+        'relative group rounded-2xl border-2 border-dashed transition-all duration-300 overflow-hidden',
+        'flex flex-col items-center justify-center gap-4 p-10 min-h-[240px]',
         isDragging
-          ? 'border-primary-500 bg-primary-500/10'
-          : 'border-dark-600 hover:border-primary-500/50 bg-dark-800/30',
-        isLoading && 'opacity-50 pointer-events-none'
+          ? 'border-primary bg-primary/10 scale-[1.02] shadow-[0_0_30px_rgba(59,130,246,0.2)]'
+          : 'border-white/10 hover:border-primary/50 hover:bg-white/[0.02] bg-black/20',
+        isLoading && 'opacity-50 pointer-events-none cursor-not-allowed'
       )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -114,9 +117,7 @@ export function FileUploader({
           triggerFileDialog();
         }
       }}
-      aria-label="选择并上传发货计划文件"
     >
-      {/* 不使用全屏透明 input 覆盖层，避免在 Chrome 中出现点击/触发异常 */}
       <input
         type="file"
         accept=".xlsx,.xls,.csv"
@@ -128,31 +129,40 @@ export function FileUploader({
 
       <div
         className={cn(
-          'w-16 h-16 rounded-full flex items-center justify-center transition-all',
-          isDragging ? 'bg-primary-500/20 animate-pulse' : 'bg-dark-700'
+          'w-20 h-20 rounded-full flex items-center justify-center transition-all duration-500 relative',
+          isDragging ? 'bg-primary/20 scale-110' : 'bg-white/5 group-hover:bg-primary/10'
         )}
       >
+        {/* Glow effect */}
+        <div className={cn(
+          "absolute inset-0 rounded-full bg-primary/20 blur-xl opacity-0 transition-opacity duration-500",
+          (isDragging || !isLoading) && "group-hover:opacity-100"
+        )} />
+
         <Upload
           className={cn(
-            'w-8 h-8 transition-colors',
-            isDragging ? 'text-primary-500' : 'text-dark-400'
+            'w-10 h-10 transition-colors duration-300 relative z-10',
+            isDragging ? 'text-primary' : 'text-slate-400 group-hover:text-primary'
           )}
         />
       </div>
 
-      <div className="text-center">
-        <p className="text-white font-medium">
-          {isLoading ? '正在解析文件...' : '拖放文件到此处，或点击选择'}
+      <div className="text-center space-y-2 relative z-10">
+        <p className="text-lg font-medium text-slate-200 group-hover:text-white transition-colors">
+          {isLoading ? '正在解析数据谱...' : '点击或拖拽上传文件'}
         </p>
-        <p className="text-dark-400 text-sm mt-1">
-          支持 .xlsx、.xls、.csv 格式，最大 10MB
+        <p className="text-slate-500 text-sm">
+          支持 .xlsx, .xls, .csv 格式 (Max 10MB)
         </p>
-        <div
-          className="mt-4 px-4 py-2 rounded-lg bg-primary-500/80 text-dark-900 font-medium hover:bg-primary-500 transition-colors"
-          aria-hidden="true"
+      </div>
+
+      <div className="mt-4">
+        <Button
+          variant={isDragging ? 'primary' : 'secondary'}
+          className="pointer-events-none group-hover:scale-105"
         >
           选择文件
-        </div>
+        </Button>
       </div>
     </div>
   );

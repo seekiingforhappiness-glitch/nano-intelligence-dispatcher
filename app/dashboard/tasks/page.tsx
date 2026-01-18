@@ -46,6 +46,7 @@ export default function TasksPage() {
     startTime: '06:00',
     deadline: '20:00',
     factoryDeadline: '17:00',
+    unloadingMinutes: 30,
     costMode: 'mileage',
   });
 

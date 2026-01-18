@@ -21,7 +21,12 @@ export async function POST(request: NextRequest) {
     }
 
     const token = signAdminSession(
-      { userId: user.id, username: user.username, role: user.role },
+      {
+        userId: user.id,
+        username: user.username,
+        organizationId: user.organizationId,
+        role: user.role
+      },
       12 * 60 * 60
     );
 

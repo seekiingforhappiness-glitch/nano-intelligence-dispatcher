@@ -3,6 +3,7 @@ import crypto from 'crypto';
 export interface AdminSessionPayload {
   userId: string;
   username: string;
+  organizationId: string;
   role: 'admin' | 'operator' | 'viewer';
   iat: number;
   exp: number;

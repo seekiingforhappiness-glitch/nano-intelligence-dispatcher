@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     const taskId = uuidv4();
 
     // 初始化任务状态
-    initTask(taskId, {
+    await initTask(taskId, {
       fileName: file.name,
       sheetName,
     });
@@ -130,11 +130,11 @@ async function processSchedule(
   vehicles: VehicleConfig[],
   warehouseConfig: WarehouseScheduleConfig
 ) {
-  const task = getTask(taskId);
+  const task = await getTask(taskId);
   if (!task) return;
 
   try {
-    updateTask(taskId, { status: 'processing' });
+    await updateTask(taskId, { status: 'processing' });
 
     // 读取文件
     const buffer = await file.arrayBuffer();
@@ -164,9 +164,9 @@ async function processSchedule(
       firstErrors: report.errors.slice(0, 5),
     });
 
-    updateTask(taskId, {
+    await updateTask(taskId, {
       meta: {
-        ...(getTask(taskId)?.meta || {}),
+        ...((await getTask(taskId))?.meta || {}),
         sheetName: sheet,
         totalRows: report.totalRows,
         validRows: report.validRows,
@@ -195,7 +195,7 @@ async function processSchedule(
       throw new Error(hint);
     }
 
-    const allWarehouses = listWarehouses();
+    const allWarehouses = await listWarehouses();
     const resolvedWarehouse = resolveSingleWarehouse(warehouseConfig.warehouseId, allWarehouses);
     const warehouseLabel = resolvedWarehouse?.name || getDepotConfig().name;
     const singleResult = await runSingleWarehouseSchedule(
@@ -203,8 +203,8 @@ async function processSchedule(
       resolvedWarehouse,
       options,
       vehicles,
-      (progress) => {
-        updateTask(taskId, {
+      async (progress) => {
+        await updateTask(taskId, {
           progress: {
             ...progress,
             message: `[${warehouseLabel}] ${progress.message}`,
@@ -214,12 +214,12 @@ async function processSchedule(
     );
 
     if (singleResult.status === 'failed') {
-      updateTask(taskId, { status: 'failed', result: singleResult, error: singleResult.error || '调度失败' });
+      await updateTask(taskId, { status: 'failed', result: singleResult, error: singleResult.error || '调度失败' });
       return;
     }
-    updateTask(taskId, { status: 'completed', result: singleResult, error: null });
+    await updateTask(taskId, { status: 'completed', result: singleResult, error: null });
   } catch (error) {
-    updateTask(taskId, { status: 'failed', error: (error as Error).message });
+    await updateTask(taskId, { status: 'failed', error: (error as Error).message });
     console.error('调度执行失败:', error);
   }
 }
@@ -303,7 +303,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: '缺少 taskId' }, { status: 400 });
   }
 
-  const task = getTask(taskId);
+  const task = await getTask(taskId);
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
   }

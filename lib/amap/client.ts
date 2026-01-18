@@ -1,5 +1,7 @@
 import { rateLimitConfig } from '@/config';
 import { tryFallbackGeocode } from './fallback';
+import { prisma } from '@/lib/prisma';
+import crypto from 'crypto';
 
 const AMAP_KEY = process.env.AMAP_KEY || '';
 const GEOCODE_URL = 'https://restapi.amap.com/v3/geocode/geo';
@@ -29,8 +31,16 @@ export interface RouteResult {
   error?: string;
 }
 
-// 简单的内存缓存
-const geocodeCache = new Map<string, GeocodeResult>();
+// 内存缓存（用于当前会话的快速查找）
+const memoryCache = new Map<string, GeocodeResult>();
+
+/**
+ * 生成地址哈希（用于数据库唯一索引）
+ */
+function hashAddress(address: string): string {
+  const normalized = address.trim().toLowerCase().replace(/\s+/g, '');
+  return crypto.createHash('md5').update(normalized).digest('hex');
+}
 
 /**
  * 延迟函数
@@ -68,17 +78,91 @@ async function fetchWithRetry(
 }
 
 /**
+ * 从数据库加载缓存
+ */
+async function loadFromDbCache(address: string): Promise<GeocodeResult | null> {
+  try {
+    const hash = hashAddress(address);
+    const cached = await prisma.geoCache.findUnique({
+      where: { addressHash: hash },
+    });
+
+    if (cached) {
+      // 更新使用统计
+      await prisma.geoCache.update({
+        where: { addressHash: hash },
+        data: {
+          hitCount: { increment: 1 },
+          lastUsedAt: new Date(),
+        },
+      }).catch(() => { }); // 忽略更新错误
+
+      return {
+        success: true,
+        lng: cached.lng,
+        lat: cached.lat,
+        formattedAddress: cached.formattedAddress || '',
+        source: 'cache',
+      };
+    }
+  } catch (error) {
+    console.warn('GeoCache DB read error:', error);
+  }
+  return null;
+}
+
+/**
+ * 保存到数据库缓存
+ */
+async function saveToDbCache(
+  address: string,
+  result: GeocodeResult
+): Promise<void> {
+  if (!result.success) return;
+
+  try {
+    const hash = hashAddress(address);
+    await prisma.geoCache.upsert({
+      where: { addressHash: hash },
+      create: {
+        addressHash: hash,
+        originalAddress: address,
+        normalizedAddress: address.trim(),
+        formattedAddress: result.formattedAddress,
+        lng: result.lng,
+        lat: result.lat,
+        source: result.source === 'cache' ? 'api' : result.source,
+      },
+      update: {
+        hitCount: { increment: 1 },
+        lastUsedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.warn('GeoCache DB write error:', error);
+  }
+}
+
+/**
  * 地理编码 - 地址转坐标
  */
 export async function geocodeAddress(address: string): Promise<GeocodeResult> {
-  // 1. 检查缓存
   const cacheKey = address.trim();
-  if (geocodeCache.has(cacheKey)) {
-    const cached = geocodeCache.get(cacheKey)!;
+
+  // 1. 检查内存缓存
+  if (memoryCache.has(cacheKey)) {
+    const cached = memoryCache.get(cacheKey)!;
     return { ...cached, source: 'cache' };
   }
 
-  // 2. 检查 API Key
+  // 2. 检查数据库缓存
+  const dbCached = await loadFromDbCache(cacheKey);
+  if (dbCached) {
+    memoryCache.set(cacheKey, dbCached); // 同时加入内存缓存
+    return dbCached;
+  }
+
+  // 3. 检查 API Key
   if (!AMAP_KEY) {
     const fallback = tryFallbackGeocode(address);
     if (fallback) {
@@ -90,7 +174,8 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
         source: 'fallback',
         note: fallback.reason,
       };
-      geocodeCache.set(cacheKey, result);
+      memoryCache.set(cacheKey, result);
+      await saveToDbCache(cacheKey, result);
       return result;
     }
     return {
@@ -103,7 +188,7 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
     };
   }
 
-  // 3. 调用高德 API
+  // 4. 调用高德 API
   try {
     const url = `${GEOCODE_URL}?key=${AMAP_KEY}&address=${encodeURIComponent(address)}&city=江苏`;
     const response = await fetchWithRetry(url);
@@ -121,8 +206,9 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
         source: 'api',
       };
 
-      // 缓存结果
-      geocodeCache.set(cacheKey, result);
+      // 保存到缓存
+      memoryCache.set(cacheKey, result);
+      await saveToDbCache(cacheKey, result);
 
       return result;
     } else {
@@ -136,7 +222,8 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
           source: 'fallback',
           note: fallback.reason,
         };
-        geocodeCache.set(cacheKey, result);
+        memoryCache.set(cacheKey, result);
+        await saveToDbCache(cacheKey, result);
         return result;
       }
       return {
@@ -159,7 +246,8 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
         source: 'fallback',
         note: fallback.reason,
       };
-      geocodeCache.set(cacheKey, result);
+      memoryCache.set(cacheKey, result);
+      await saveToDbCache(cacheKey, result);
       return result;
     }
     return {
@@ -187,22 +275,27 @@ export async function batchGeocode(
   const unique = Array.from(new Set(addresses));
   const qps = rateLimitConfig.amap.geocodeQPS;
   let cacheHits = 0;
+  let apiCalls = 0;
 
   for (let i = 0; i < unique.length; i++) {
     const address = unique[i];
     const geocodeResult = await geocodeAddress(address);
     if (geocodeResult.source === 'cache') {
       cacheHits++;
+    } else if (geocodeResult.source === 'api') {
+      apiCalls++;
     }
     results.set(address, geocodeResult);
 
     onProgress?.(i + 1, unique.length, { cacheHits });
 
-    // 限流控制
-    if ((i + 1) % qps === 0 && i < unique.length - 1) {
+    // 限流控制（只对 API 调用计数）
+    if (apiCalls > 0 && apiCalls % qps === 0 && i < unique.length - 1) {
       await delay(1000);
     }
   }
+
+  console.log(`📍 地址解析统计: 总数=${unique.length}, 缓存命中=${cacheHits}, API调用=${apiCalls}`);
 
   return { results, cacheHits };
 }
@@ -289,18 +382,36 @@ export async function batchCalculateRoutes(
 /**
  * 获取缓存统计
  */
-export function getCacheStats() {
-  return {
-    size: geocodeCache.size,
-    entries: Array.from(geocodeCache.keys()),
-  };
+export async function getCacheStats() {
+  try {
+    const dbCount = await prisma.geoCache.count();
+    const totalHits = await prisma.geoCache.aggregate({
+      _sum: { hitCount: true },
+    });
+    return {
+      memorySize: memoryCache.size,
+      dbSize: dbCount,
+      totalHits: totalHits._sum.hitCount || 0,
+    };
+  } catch {
+    return {
+      memorySize: memoryCache.size,
+      dbSize: 0,
+      totalHits: 0,
+    };
+  }
 }
 
 /**
  * 清除缓存
  */
-export function clearCache() {
-  geocodeCache.clear();
+export async function clearCache(dbToo = false) {
+  memoryCache.clear();
+  if (dbToo) {
+    try {
+      await prisma.geoCache.deleteMany({});
+    } catch (error) {
+      console.warn('GeoCache clear error:', error);
+    }
+  }
 }
-
-

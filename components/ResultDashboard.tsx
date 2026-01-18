@@ -3,6 +3,9 @@
 import { Download, Copy, AlertTriangle, CheckCircle, Truck, Route, Clock, DollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScheduleResult } from '@/types/schedule';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
 
 interface ResultDashboardProps {
   result: ScheduleResult;
@@ -25,12 +28,12 @@ export function ResultDashboard({
   return (
     <div className="space-y-6">
       {/* 成功提示 */}
-      <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-3">
-        <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
+      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.1)]">
+        <CheckCircle className="w-6 h-6 text-emerald-500 flex-shrink-0" />
         <div>
-          <p className="text-green-400 font-medium">排线完成！</p>
-          <p className="text-green-400/70 text-sm">
-            已为 {summary.totalOrders} 个订单生成 {summary.totalTrips} 个车次
+          <p className="text-emerald-400 font-medium">排线智能调度完成</p>
+          <p className="text-emerald-400/70 text-sm">
+            系统已成功为 <span className="text-white font-mono mx-1">{summary.totalOrders}</span> 个订单生成 <span className="text-white font-mono mx-1">{summary.totalTrips}</span> 个最优车次方案
           </p>
         </div>
       </div>
@@ -67,38 +70,40 @@ export function ResultDashboard({
       </div>
 
       {/* 车型分布 */}
-      <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4">
-        <h4 className="text-white font-medium mb-3">车型分布</h4>
+      <Card variant="glass" className="p-5">
+        <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+          <Truck className="w-4 h-4 text-primary" />
+          车型分布详情
+        </h4>
         <div className="flex flex-wrap gap-2">
           {Object.entries(summary.vehicleBreakdown).map(([type, count]) => (
-            <div
-              key={type}
-              className="px-3 py-1.5 bg-dark-700 rounded-lg flex items-center gap-2"
-            >
-              <span className="text-dark-300">{type}</span>
-              <span className="text-primary-400 font-medium">×{count}</span>
-            </div>
+            <Badge key={type} variant="tech" className="px-3 py-1.5 text-sm">
+              <span className="text-slate-300 mr-2">{type}</span>
+              <span className="text-white font-bold">× {count}</span>
+            </Badge>
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-4 text-sm text-dark-400">
-          <span>
-            平均装载率(重量):{' '}
-            <span className="text-primary-400">
-              {Math.round(summary.avgLoadRateWeight * 100)}%
-            </span>
-          </span>
-          <span>
-            平均装载率(托盘):{' '}
-            <span className="text-primary-400">
-              {Math.round(summary.avgLoadRatePallet * 100)}%
-            </span>
-          </span>
+        <div className="mt-4 pt-3 border-t border-white/5 flex items-center gap-6 text-sm text-slate-400">
+          <div className="flex items-center gap-2">
+            <span>平均重量装载率:</span>
+            <div className="h-1.5 w-16 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-primary" style={{ width: `${summary.avgLoadRateWeight * 100}%` }} />
+            </div>
+            <span className="text-primary font-mono">{Math.round(summary.avgLoadRateWeight * 100)}%</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>平均托盘装载率:</span>
+            <div className="h-1.5 w-16 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500" style={{ width: `${summary.avgLoadRatePallet * 100}%` }} />
+            </div>
+            <span className="text-emerald-500 font-mono">{Math.round(summary.avgLoadRatePallet * 100)}%</span>
+          </div>
         </div>
-      </div>
+      </Card>
 
       {/* 约束触发情况 */}
-      <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4">
-        <h4 className="text-white font-medium mb-3">约束触发情况</h4>
+      <Card variant="glass" className="p-5">
+        <h4 className="text-white font-medium mb-3">约束规则触发统计</h4>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
           <ConstraintBadge
             label="飞翼车要求"
@@ -121,55 +126,51 @@ export function ResultDashboard({
             count={summary.constraintsSummary.singleTripOrders}
           />
         </div>
-      </div>
+      </Card>
 
       {/* 风险提示 */}
       {(summary.riskOrders.length > 0 || summary.invalidOrders.length > 0) && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
+        <Card variant="outline" className="p-4 border-yellow-500/30 bg-yellow-500/5">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-yellow-400 font-medium">风险提示</p>
+              <p className="text-yellow-400 font-medium">调度风险预警</p>
               {summary.riskOrders.length > 0 && (
-                <p className="text-yellow-400/70 text-sm mt-1">
-                  {summary.riskOrders.length} 单可能晚到：
-                  {summary.riskOrders.slice(0, 5).join(', ')}
+                <p className="text-yellow-400/80 text-sm mt-1">
+                  <span className="font-bold">{summary.riskOrders.length}</span> 单可能存在延误风险：
+                  <span className="opacity-80 ml-1">{summary.riskOrders.slice(0, 5).join(', ')}</span>
                   {summary.riskOrders.length > 5 && ' ...'}
                 </p>
               )}
               {summary.invalidOrders.length > 0 && (
-                <p className="text-yellow-400/70 text-sm mt-1">
-                  {summary.invalidOrders.length} 单无法排线（地址解析失败）
+                <p className="text-yellow-400/80 text-sm mt-1">
+                  <span className="font-bold">{summary.invalidOrders.length}</span> 单地址解析失败，无法自动排线
                 </p>
               )}
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 操作按钮 */}
-      <div className="flex flex-wrap gap-3">
-        <button
+      <div className="flex flex-wrap gap-3 pt-2">
+        <Button
           onClick={onDownload}
-          disabled={isDownloading}
-          className={cn(
-            'flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all',
-            'bg-primary-500 hover:bg-primary-400 text-dark-900',
-            isDownloading && 'opacity-50 cursor-not-allowed'
-          )}
+          isLoading={isDownloading}
+          className="px-6"
         >
-          <Download className="w-5 h-5" />
-          {isDownloading ? '正在生成...' : '下载排线结果'}
-        </button>
+          <Download className="w-4 h-4 mr-2" />
+          下载排线结果 (Excel)
+        </Button>
 
-        <button
+        <Button
+          variant="secondary"
           onClick={handleCopySummary}
-          className="flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all
-            border border-dark-600 hover:border-primary-500/50 text-white hover:text-primary-400"
+          className="px-6"
         >
-          <Copy className="w-5 h-5" />
+          <Copy className="w-4 h-4 mr-2" />
           复制汇总报告
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -189,31 +190,39 @@ function MetricCard({
   color?: 'primary' | 'accent' | 'blue' | 'green';
 }) {
   const colorClasses = {
-    primary: 'bg-primary-500/10 border-primary-500/30 text-primary-400',
-    accent: 'bg-accent-500/10 border-accent-500/30 text-accent-400',
-    blue: 'bg-blue-500/10 border-blue-500/30 text-blue-400',
-    green: 'bg-green-500/10 border-green-500/30 text-green-400',
+    primary: 'bg-primary/10 border-primary/20 text-primary',
+    accent: 'bg-orange-500/10 border-orange-500/20 text-orange-500',
+    blue: 'bg-blue-500/10 border-blue-500/20 text-blue-500',
+    green: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500',
   };
 
   return (
-    <div className={cn('rounded-xl p-4 border', colorClasses[color])}>
-      <div className="flex items-center gap-2 mb-2 opacity-70">{icon}</div>
-      <div className="text-2xl font-bold text-white">
-        {value}
-        {unit && <span className="text-sm font-normal text-dark-400 ml-1">{unit}</span>}
+    <Card className={cn('p-5 border flex flex-col justify-between h-28', colorClasses[color])}>
+      <div className="flex justify-between items-start">
+        <div className="opacity-80">{icon}</div>
+        <div className="text-xs font-medium opacity-60 uppercase tracking-wider">{label}</div>
       </div>
-      <div className="text-sm opacity-70">{label}</div>
-    </div>
+      <div className="text-3xl font-bold font-mono tracking-tight text-white mt-2">
+        {value}
+        {unit && <span className="text-sm font-normal text-slate-400 ml-1.5">{unit}</span>}
+      </div>
+    </Card>
   );
 }
 
 function ConstraintBadge({ label, count }: { label: string; count: number }) {
+  if (count === 0) {
+    return (
+      <div className="flex items-center justify-between p-2.5 bg-white/5 border border-white/5 rounded-lg opacity-60">
+        <span className="text-slate-400">{label}</span>
+        <span className="text-slate-600">-</span>
+      </div>
+    );
+  }
   return (
-    <div className="flex items-center justify-between p-2 bg-dark-700 rounded-lg">
-      <span className="text-dark-300">{label}</span>
-      <span className={cn('font-medium', count > 0 ? 'text-primary-400' : 'text-dark-500')}>
-        {count}
-      </span>
+    <div className="flex items-center justify-between p-2.5 bg-primary/10 border border-primary/20 rounded-lg shadow-[0_0_10px_rgba(59,130,246,0.1)]">
+      <span className="text-slate-200">{label}</span>
+      <span className="font-bold text-primary">{count}</span>
     </div>
   );
 }

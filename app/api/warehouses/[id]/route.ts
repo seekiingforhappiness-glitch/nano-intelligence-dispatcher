@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
-  const warehouse = getWarehouse(params.id);
+  const warehouse = await getWarehouse(params.id);
   if (!warehouse) {
     return NextResponse.json({ error: '仓库不存在' }, { status: 404 });
   }
@@ -15,7 +15,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = (await request.json()) as Partial<WarehouseInput>;
-    const warehouse = updateWarehouse(params.id, body);
+    const warehouse = await updateWarehouse(params.id, body);
     if (!warehouse) {
       return NextResponse.json({ error: '仓库不存在' }, { status: 404 });
     }
@@ -27,7 +27,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 export async function DELETE(_: NextRequest, { params }: { params: { id: string } }) {
-  deleteWarehouse(params.id);
+  await deleteWarehouse(params.id);
   return NextResponse.json({ success: true });
 }
 

@@ -2,33 +2,20 @@
   "version": 1,
   "users": [
     {
-      "id": "32e01456-00cb-4c97-8fbc-55da3eb180a1",
+      "id": "bf4ca6a0-afab-44e9-aa2d-093e64f800c9",
       "username": "admin",
+      "organizationId": "demo-org-001",
       "role": "admin",
       "password": {
         "algo": "pbkdf2_sha256",
         "iterations": 210000,
-        "saltBase64": "JI2fU/ofH9tpdbRD139JlA==",
-        "hashBase64": "EgmMgcATmrGziah+JwJN7K1JNXT5ERz+e9N41BXO3qs="
+        "saltBase64": "YOZuJL7ngtDKiGcHjUp48w==",
+        "hashBase64": "RG9gWqeClySTNT/vHrzRgZZrMvRTN9x86Bfea3vtziQ="
       },
       "enabled": true,
-      "createdAt": "2026-01-04T01:19:04.396Z",
-      "updatedAt": "2026-01-04T10:52:04.251Z",
-      "lastLoginAt": "2026-01-04T10:52:04.251Z"
-    },
-    {
-      "id": "c1a32acd-c6fa-4e58-b9db-05a672b8fd6a",
-      "username": "nami",
-      "role": "operator",
-      "password": {
-        "algo": "pbkdf2_sha256",
-        "iterations": 210000,
-        "saltBase64": "xJLe/EfzAf6PoLuRSiGthw==",
-        "hashBase64": "7hP+d8JOJZwuLt+AqYFrp7euQnVtK3UGePjytTt6Uic="
-      },
-      "enabled": true,
-      "createdAt": "2026-01-04T01:19:49.091Z",
-      "updatedAt": "2026-01-04T10:55:08.290Z"
+      "createdAt": "2026-01-18T01:49:15.235Z",
+      "updatedAt": "2026-01-18T03:11:38.147Z",
+      "lastLoginAt": "2026-01-18T03:11:38.147Z"
     }
   ]
 }

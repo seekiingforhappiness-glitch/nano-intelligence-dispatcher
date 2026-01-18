@@ -27,6 +27,7 @@ const DEFAULT_OPTIONS: ScheduleOptions = {
   startTime: '06:00',
   deadline: '20:00',
   factoryDeadline: '17:00',
+  unloadingMinutes: 30,
   costMode: 'mileage',
   showMarketReference: true,
 };
@@ -67,7 +68,7 @@ export async function scheduleOrders(
 
     // ===== 阶段 1: 解析约束 =====
     reportProgress(1, '解析运输要求', 10, '正在解析运输约束...');
-    
+
     const ordersWithConstraints: Order[] = cleanedOrders
       .filter(o => o.isValid)
       .map(o => ({
@@ -78,7 +79,9 @@ export async function scheduleOrders(
         effectivePalletSlots: 1, // 暂时默认
       }));
 
-    const fallbackEndTime = opts.factoryDeadline || opts.deadline;
+    // 使用 deadline（默认20:00）作为默认时间窗结束时间，而不是 factoryDeadline（17:00）
+    // factoryDeadline 应该只用于有特殊要求的订单
+    const fallbackEndTime = opts.deadline;
 
     // 计算有效托盘位（考虑堆叠）并注入默认时间窗
     for (const order of ordersWithConstraints) {
@@ -129,11 +132,10 @@ export async function scheduleOrders(
       2,
       '地址解析',
       50,
-      `地址解析完成，成功 ${geocodeSuccess}/${ordersWithConstraints.length}${
-        cacheHits > 0 ? `（缓存命中 ${cacheHits}）` : ''
+      `地址解析完成，成功 ${geocodeSuccess}/${ordersWithConstraints.length}${cacheHits > 0 ? `（缓存命中 ${cacheHits}）` : ''
       }`
     );
-    
+
     console.log('📍 地址解析结果:', {
       total: ordersWithConstraints.length,
       success: geocodeSuccess,
@@ -147,127 +149,25 @@ export async function scheduleOrders(
     // 过滤掉无法解析地址的订单
     const validOrders = ordersWithConstraints.filter(o => o.coordinates);
     const invalidOrders = ordersWithConstraints.filter(o => !o.coordinates);
-    
+
     console.log('🚛 可排线订单数:', validOrders.length);
 
-    // ===== 阶段 3: 分组 =====
-    reportProgress(3, '区域分组', 55, '正在按区域分组...');
+    // ===== 阶段 3 & 4: 执行调度策略 =====
+    const strategyId = (options as any).strategyId || 'greedy';
+    const { solverRegistry } = await import('./strategies/registry');
+    const strategy = solverRegistry.get(strategyId) || solverRegistry.get('greedy')!;
 
-    const clusters = clusterOrders(validOrders, depotCoord);
-    reportProgress(3, '区域分组', 60, `已分为 ${clusters.length} 个区域组`);
+    console.log(`🚀 使用调度策略: ${strategy.name}`);
 
-    // ===== 阶段 4: 装箱与路径优化 =====
-    reportProgress(4, '排线优化', 65, '正在生成车次...');
+    const solverOutput = await strategy.solve({
+      orders: validOrders as any,
+      depot: depotCoord,
+      vehicles,
+      options: opts,
+      onProgress,
+    });
 
-    const allTrips: Trip[] = [];
-    let tripIndex = 1;
-
-    for (const cluster of clusters) {
-      // 装箱
-      const tempTrips = packTrips(cluster.orders, opts.maxStops, vehicles);
-
-      for (const tempTrip of tempTrips) {
-        // 路径优化
-        const optimizedOrders = optimizeRoute(tempTrip.orders, depotCoord);
-
-        // 计算距离
-        const totalDistance = estimateRoadDistance(
-          calculateTotalDistance(optimizedOrders, depotCoord)
-        );
-        const segmentDistances = calculateSegmentDistances(optimizedOrders, depotCoord);
-
-        // 选择车型
-        const vehicleResult = selectVehicle(
-          tempTrip,
-          vehicles,
-          totalDistance,
-          opts.costMode as CostMode
-        );
-
-        // 生成停靠点
-        const stops: TripStop[] = [];
-        let cumulativeDistance = 0;
-        let cumulativeDuration = 0;
-        const [startHour, startMin] = opts.startTime.split(':').map(Number);
-        let currentTime = startHour * 60 + startMin; // 分钟
-
-        for (let i = 0; i < optimizedOrders.length; i++) {
-          const order = optimizedOrders[i];
-          const segmentDist = estimateRoadDistance(segmentDistances[i] || 0);
-          const segmentDur = estimateDuration(segmentDist) * 60; // 转分钟
-
-          cumulativeDistance += segmentDist;
-          cumulativeDuration += segmentDur;
-          currentTime += segmentDur;
-
-          // 检查时间窗
-          const deadlineMin = parseTime(opts.deadline);
-          const isOnTime = currentTime <= deadlineMin;
-          const timeWindow = order.constraints.timeWindow;
-          let delayMinutes: number | undefined;
-
-          if (timeWindow) {
-            const windowEnd = parseTime(timeWindow.end);
-            if (currentTime > windowEnd) {
-              delayMinutes = currentTime - windowEnd;
-            }
-          }
-
-          stops.push({
-            sequence: i + 1,
-            order,
-            eta: formatTime(currentTime),
-            etd: formatTime(currentTime + 30), // 假设每站停留30分钟
-            distanceFromPrev: segmentDist,
-            durationFromPrev: segmentDur / 60, // 转小时
-            cumulativeDistance,
-            cumulativeDuration: cumulativeDuration / 60,
-            isOnTime: isOnTime && !delayMinutes,
-            delayMinutes,
-          });
-
-          currentTime += 30; // 停留时间
-        }
-
-        // 计算返回时间
-        const lastOrder = optimizedOrders[optimizedOrders.length - 1];
-        const returnDistance = lastOrder?.coordinates
-          ? estimateRoadDistance(haversineDistance(
-              lastOrder.coordinates.lat, lastOrder.coordinates.lng,
-              depotCoord.lat, depotCoord.lng
-            ))
-          : 0;
-        const returnDuration = estimateDuration(returnDistance) * 60;
-        currentTime += returnDuration;
-
-        const trip: Trip = {
-          tripId: `T${String(tripIndex++).padStart(3, '0')}`,
-          vehicleType: vehicleResult.vehicle.name,
-          stops,
-          departureTime: opts.startTime,
-          returnTime: formatTime(currentTime),
-          totalDistance: cumulativeDistance + returnDistance,
-          totalDuration: (cumulativeDuration + returnDuration) / 60,
-          totalWeightKg: tempTrip.totalWeightKg,
-          totalPalletSlots: tempTrip.totalPalletSlots,
-          loadRateWeight: vehicleResult.loadRateWeight,
-          loadRatePallet: vehicleResult.loadRatePallet,
-          estimatedCost: vehicleResult.cost,
-          costBreakdown: vehicleResult.costBreakdown,
-          isValid: stops.every(s => s.isOnTime),
-          hasRisk: stops.some(s => !s.isOnTime),
-          riskStops: stops.filter(s => !s.isOnTime).map(s => s.sequence),
-          reason: vehicleResult.reason,
-        };
-
-        allTrips.push(trip);
-      }
-
-      const progress = 65 + Math.round((clusters.indexOf(cluster) / clusters.length) * 25);
-      reportProgress(4, '排线优化', progress, `已处理 ${clusters.indexOf(cluster) + 1}/${clusters.length} 个区域`);
-    }
-
-    reportProgress(4, '排线优化', 90, `生成 ${allTrips.length} 个车次`);
+    const allTrips = solverOutput.trips;
 
     // ===== 阶段 5: 生成汇总 =====
     reportProgress(5, '生成报告', 95, '正在生成汇总报告...');

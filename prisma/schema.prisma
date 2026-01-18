@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../data/nano.db"
+}
+
+// -----------------------------------------------------------------------------
+// Identity & Access (Multi-tenancy)
+// -----------------------------------------------------------------------------
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  vehicles    Vehicle[]
+  drivers     Driver[]
+  orders      Order[]
+  warehouses  Warehouse[]
+  tasks       Task[]
+  shipments   Shipment[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  name           String?
+  hashedPassword String?      // For credentials auth
+  role           String       @default("member") // admin, member, viewer
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+// Core Logistics Data
+// -----------------------------------------------------------------------------
+
+model Warehouse {
+  id             String       @id @default(uuid())
+  code           String       // User facing code
+  name           String
+  address        String
+  lat            Float
+  lng            Float
+  timeWindowStart String?     // e.g. "08:00"
+  timeWindowEnd   String?     // e.g. "18:00"
+  capacity       Int?
+  notes          String?
+  active         Boolean      @default(true)
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, code])
+  @@map("warehouses")
+}
+
+model Driver {
+  id             String       @id @default(uuid())
+  name           String
+  phone          String?
+  licenseType    String?
+  status         String       @default("active") // active, inactive
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  shipments      Shipment[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("drivers")
+}
+
+model Vehicle {
+  id             String       @id @default(uuid())
+  plateNumber    String
+  vehicleType    String?
+  capacityWeight Float?
+  capacityVolume Float?
+  status         String       @default("idle") // idle, busy, maintenance
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  shipments      Shipment[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, plateNumber])
+  @@map("vehicles")
+}
+
+model Order {
+  id             String       @id @default(uuid())
+  orderNumber    String
+  customerName   String?
+  address        String
+  latitude       Float?
+  longitude      Float?
+  weight         Float?
+  volume         Float?
+  quantity       Int?
+  deliveryDate   DateTime?
+  timeWindow     String?
+  requirements   String?      // JSON or text
+  status         String       @default("pending") // pending, scheduled, completed, failed
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  shipmentItems  ShipmentOrder[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, orderNumber])
+  @@map("orders")
+}
+
+// -----------------------------------------------------------------------------
+// Scheduling & Operations
+// -----------------------------------------------------------------------------
+
+model Task {
+  id             String       @id @default(uuid()) // task_id
+  status         String       // pending, processing, completed, failed
+  progress       Json?        // Structured progress data
+  result         Json?        // Full schedule result
+  error          String?
+  meta           Json?        // Configuration used
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("tasks")
+}
+
+model Shipment {
+  id              String       @id @default(uuid())
+  shipmentNumber  String
+  driverId        String?
+  driver          Driver?      @relation(fields: [driverId], references: [id])
+  vehicleId       String?
+  vehicle         Vehicle?     @relation(fields: [vehicleId], references: [id])
+  
+  departureTime   DateTime?
+  estimatedArrival DateTime?
+  totalWeight     Float?
+  totalDistance   Float?
+  totalCost       Float?
+  status          String       @default("draft") // draft, confirmed, in_transit, completed
+  
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  
+  items           ShipmentOrder[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([organizationId, shipmentNumber])
+  @@map("shipments")
+}
+
+model ShipmentOrder {
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id])
+  
+  sequenceNumber Int
+
+  @@id([shipmentId, orderId])
+  @@map("shipment_orders")
+}
+
+// -----------------------------------------------------------------------------
+// Caching
+// -----------------------------------------------------------------------------
+
+model GeoCache {
+  id               String   @id @default(uuid())
+  addressHash      String   @unique  // MD5 hash of normalized address for fast lookup
+  originalAddress  String             // Original input address
+  normalizedAddress String?           // Cleaned/normalized version
+  formattedAddress String?            // Response from AMap
+  lng              Float
+  lat              Float
+  source           String             // 'api', 'fallback', 'manual'
+  hitCount         Int      @default(1)  // Number of times this cache was used
+  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([addressHash])
+  @@map("geo_cache")
+}

@@ -21,14 +21,9 @@ export default function RootLayout({
         {/* 背景效果 */}
         <div className="fixed inset-0 bg-grid opacity-50 pointer-events-none" />
         <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-gradient-radial from-primary-500/10 via-transparent to-transparent opacity-50 pointer-events-none" />
-        
-        {/* 主内容 */}
-        <div className="relative z-10 min-h-screen">
-          {children}
-        </div>
+
+        {children}
       </body>
     </html>
   );
 }
-
-
