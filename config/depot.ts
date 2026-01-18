@@ -13,15 +13,15 @@ export interface DepotConfig {
 }
 
 /**
- * 默认发货仓 - 江苏金发科技生产基地
+ * 默认发货仓 - 江苏金发科技新材料有限公司
  */
 export const defaultDepot: DepotConfig = {
   id: 'kunshan-jf',
-  name: '江苏金发科技生产基地',
-  address: '江苏省苏州市昆山市千灯镇石浦恒升路101号',
+  name: '江苏金发科技新材料有限公司',
+  address: '苏州市昆山市西江路388号',
   coordinates: {
-    lng: parseFloat(process.env.DEPOT_LNG || '121.2367'),
-    lat: parseFloat(process.env.DEPOT_LAT || '31.2156'),
+    lng: parseFloat(process.env.DEPOT_LNG || '120.9427'),
+    lat: parseFloat(process.env.DEPOT_LAT || '31.3256'),
   },
   isDefault: true,
 };
@@ -41,5 +41,3 @@ export function getDepotConfig(): DepotConfig {
     isDefault: true,
   };
 }
-
-

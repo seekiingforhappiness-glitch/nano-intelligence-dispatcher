@@ -70,7 +70,7 @@ export function WarehouseManager() {
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || '保存失败');
+        throw new Error(data.details || data.error || '保存失败');
       }
       setForm(emptyForm);
       setEditingId(null);
