@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
         // We use createMany which is supported in Postgres
         const result = await prisma.order.createMany({
             data: validOrders,
-            skipDuplicates: true, // Auto-skip if order number exists
         });
 
         return NextResponse.json({
