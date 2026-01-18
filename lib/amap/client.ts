@@ -1,6 +1,6 @@
 import { rateLimitConfig } from '@/config';
 import { tryFallbackGeocode } from './fallback';
-import { prisma } from '@/lib/prisma';
+import prisma from '@/lib/prisma';
 import crypto from 'crypto';
 
 const AMAP_KEY = process.env.AMAP_KEY || '';
