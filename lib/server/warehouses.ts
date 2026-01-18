@@ -1,11 +1,27 @@
 import prisma from '@/lib/prisma';
-import { Warehouse, Prisma } from '@prisma/client';
 import { getCurrentOrganizationId } from './context';
 import { getDepotConfig } from '@/config/depot';
 
-// Re-exporting the type for compatibility using Prisma's generated type
-// We can extend this if we need derived fields
-export type WarehouseRecord = Warehouse;
+// 本地 Warehouse 类型定义（避免依赖 Prisma 生成的类型）
+export interface WarehouseRecord {
+  id: string;
+  organizationId: string;
+  code: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  timeWindowStart: string | null;
+  timeWindowEnd: string | null;
+  capacity: number | null;
+  notes: string | null;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Prisma JSON 类型替代
+const JsonNull = null as any;
 
 export async function listWarehouses(): Promise<WarehouseRecord[]> {
   const orgId = await getCurrentOrganizationId();

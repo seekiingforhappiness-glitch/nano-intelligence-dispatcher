@@ -1,8 +1,17 @@
 import prisma from '@/lib/prisma';
-import { Driver } from '@prisma/client';
 import { getCurrentOrganizationId } from './context';
 
-export type DriverRecord = Driver;
+// 本地 Driver 类型定义（避免依赖 Prisma 生成的类型）
+export interface DriverRecord {
+    id: string;
+    organizationId: string;
+    name: string;
+    phone: string | null;
+    licenseType: string | null;
+    status: string;
+    createdAt: Date;
+    updatedAt: Date;
+}
 
 export async function listDrivers(): Promise<DriverRecord[]> {
     const orgId = await getCurrentOrganizationId();

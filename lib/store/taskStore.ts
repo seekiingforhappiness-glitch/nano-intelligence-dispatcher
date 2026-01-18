@@ -1,7 +1,9 @@
 import { ScheduleProgress, ScheduleResult } from '@/types/schedule';
 import prisma from '@/lib/prisma';
 import { getCurrentOrganizationId } from '@/lib/server/context';
-import { Prisma } from '@prisma/client';
+
+// Prisma JSON 类型替代
+const JsonNull = null as any;
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
@@ -37,9 +39,9 @@ export async function initTask(taskId: string, meta?: TaskMeta): Promise<void> {
       id: taskId,
       status: 'pending',
       organizationId: orgId,
-      meta: meta ? (meta as any) : Prisma.JsonNull,
-      progress: Prisma.JsonNull,
-      result: Prisma.JsonNull,
+      meta: meta ? (meta as any) : JsonNull,
+      progress: JsonNull,
+      result: JsonNull,
     }
   });
 }

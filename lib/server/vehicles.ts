@@ -1,8 +1,18 @@
 import prisma from '@/lib/prisma';
-import { Vehicle } from '@prisma/client';
 import { getCurrentOrganizationId } from './context';
 
-export type VehicleRecord = Vehicle;
+// 本地 Vehicle 类型定义（避免依赖 Prisma 生成的类型）
+export interface VehicleRecord {
+    id: string;
+    organizationId: string;
+    plateNumber: string;
+    vehicleType: string | null;
+    capacityWeight: number | null;
+    capacityVolume: number | null;
+    status: string;
+    createdAt: Date;
+    updatedAt: Date;
+}
 
 export async function listVehicles(): Promise<VehicleRecord[]> {
     const orgId = await getCurrentOrganizationId();
