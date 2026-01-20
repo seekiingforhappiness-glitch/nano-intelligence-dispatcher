@@ -215,3 +215,20 @@ model GeoCache {
   @@index([addressHash])
   @@map("geo_cache")
 }
+
+model RouteCache {
+  id               String   @id @default(uuid())
+  routeKey         String   @unique  // "lng,lat|lng,lat"
+  originLng        Float
+  originLat        Float
+  destLng          Float
+  destLat          Float
+  distance         Float             // km
+  duration         Float             // hours
+  hitCount         Int      @default(1)
+  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([routeKey])
+  @@map("route_cache")
+}

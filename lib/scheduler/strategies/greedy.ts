@@ -47,8 +47,8 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
         let tripIndex = 1;
 
         for (const cluster of clusters) {
-            // 装箱
-            const tempTrips = packTrips(cluster.orders, opts.maxStops, vehicles);
+            // 装箱（现在是异步的，并包含时间窗硬约束检查）
+            const tempTrips = await packTrips(cluster.orders, opts.maxStops, vehicles, depotCoord, opts);
 
             for (const tempTrip of tempTrips) {
                 // 路径优化
@@ -138,8 +138,12 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
                     loadRatePallet: vehicleResult.loadRatePallet,
                     estimatedCost: vehicleResult.cost,
                     costBreakdown: vehicleResult.costBreakdown,
-                    isValid: stops.every(s => s.isOnTime),
-                    hasRisk: stops.some(s => !s.isOnTime),
+                    isValid: stops.every(s => s.isOnTime) &&
+                        tempTrip.totalWeightKg <= vehicleResult.vehicle.maxWeightKg &&
+                        tempTrip.totalPalletSlots <= vehicleResult.vehicle.palletSlots,
+                    hasRisk: stops.some(s => !s.isOnTime) ||
+                        tempTrip.totalWeightKg > vehicleResult.vehicle.maxWeightKg ||
+                        tempTrip.totalPalletSlots > vehicleResult.vehicle.palletSlots,
                     riskStops: stops.filter(s => !s.isOnTime).map(s => s.sequence),
                     reason: vehicleResult.reason,
                 };

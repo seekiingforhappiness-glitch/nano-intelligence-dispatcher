@@ -44,20 +44,20 @@ export function selectVehicle(
       availableVehicles[0] || vehicles[0]
     );
 
-    const cost = calculateCost(maxVehicle, distance, costMode);
+    const cost = calculateCost(maxVehicle, distance, trip.orders.length, costMode);
     return {
       vehicle: maxVehicle,
       cost: cost.total,
       costBreakdown: cost,
-      loadRateWeight: Math.min(trip.totalWeightKg / maxVehicle.maxWeightKg, 1),
-      loadRatePallet: Math.min(trip.totalPalletSlots / maxVehicle.palletSlots, 1),
+      loadRateWeight: trip.totalWeightKg / maxVehicle.maxWeightKg,
+      loadRatePallet: trip.totalPalletSlots / maxVehicle.palletSlots,
       reason: '容量不足，使用最大可用车型',
     };
   }
 
   // 计算每个车型的成本，选择成本最低的
   const results = suitableVehicles.map(vehicle => {
-    const cost = calculateCost(vehicle, distance, costMode);
+    const cost = calculateCost(vehicle, distance, trip.orders.length, costMode);
     return {
       vehicle,
       cost: cost.total,
@@ -83,12 +83,15 @@ export function selectVehicle(
 export function calculateCost(
   vehicle: VehicleConfig,
   distance: number,
+  stopCount: number,
   mode: CostMode
 ): CostBreakdown {
-  let total = 0;
   let fuel = 0;
   let toll = 0;
   let labor = 0;
+  let dropCharges = 0;
+  let returnEmpty = 0;
+  let total = 0;
 
   switch (mode) {
     case 'fixed':
@@ -115,14 +118,28 @@ export function calculateCost(
       break;
 
     case 'hybrid':
-      const fixedCost = vehicle.fixedPrice || 0;
-      const mileageCost = vehicle.basePrice + distance * vehicle.pricePerKm;
-      total = Math.max(fixedCost, mileageCost);
+      const fixedPrice = vehicle.fixedPrice || 0;
+      const mileagePrice = vehicle.basePrice + distance * vehicle.pricePerKm;
+      total = Math.max(fixedPrice, mileagePrice);
       fuel = total * 0.4;
       toll = total * 0.3;
       labor = total * 0.3;
       break;
   }
+
+  // 计算额外费用
+  // 1. 串点费：超过1个点后，每个点收 dropCharge
+  if (stopCount > 1 && vehicle.dropCharge) {
+    dropCharges = (stopCount - 1) * vehicle.dropCharge;
+  }
+
+  // 2. 返程空驶费：如果是长途（>50km），通常有空驶补贴
+  if (distance > 50 && vehicle.returnEmptyRate) {
+    const mileageSubtotal = distance * vehicle.pricePerKm;
+    returnEmpty = mileageSubtotal * vehicle.returnEmptyRate;
+  }
+
+  total += dropCharges + returnEmpty;
 
   // 市场参考价
   const marketReference = getMarketReference(distance, vehicle.maxWeightKg);
@@ -132,6 +149,8 @@ export function calculateCost(
     fuel: Math.round(fuel),
     toll: Math.round(toll),
     labor: Math.round(labor),
+    dropCharges: Math.round(dropCharges),
+    returnEmpty: Math.round(returnEmpty),
     other: 0,
     marketReference,
   };
@@ -164,9 +183,6 @@ function getMarketReference(
   };
 }
 
-/**
- * 批量选择车型
- */
 export function selectVehiclesForTrips(
   trips: TempTrip[],
   vehicles: VehicleConfig[],

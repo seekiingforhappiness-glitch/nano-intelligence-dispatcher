@@ -14,6 +14,7 @@ export interface RawOrder {
   packageSize: number;           // 规格
   requirementsRaw: string;       // 运输商发货要求（原始文本）
   quantity?: number;             // 数量
+  volumeM3?: number;             // 容积 (m³)
   weightDerivedFrom?: 'quantity_times_package_size'; // 重量推导来源（可选）
   rawRow?: Record<string, unknown>; // 原始表格整行
   [key: string]: unknown;        // 其他原始字段
@@ -40,10 +41,10 @@ export interface Order extends CleanedOrder {
   } | null;
   geocodeSource: 'cache' | 'api' | 'fallback' | 'failed';
   formattedAddress?: string;
-  
+
   // 解析后的约束
   constraints: RouteConstraints;
-  
+
   // 计算字段
   effectivePalletSlots: number;  // 实际占用托盘位（考虑堆叠）
   distanceFromDepot?: number;    // 距仓库距离 (km)

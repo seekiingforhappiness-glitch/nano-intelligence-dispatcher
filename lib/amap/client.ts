@@ -8,6 +8,13 @@ const GEOCODE_URL = 'https://restapi.amap.com/v3/geocode/geo';
 const ROUTE_URL = 'https://restapi.amap.com/v3/direction/driving';
 
 /**
+ * 路径规划缓存 Key
+ */
+function getRouteCacheKey(origin: { lng: number; lat: number }, destination: { lng: number; lat: number }): string {
+  return `${origin.lng.toFixed(6)},${origin.lat.toFixed(6)}|${destination.lng.toFixed(6)},${destination.lat.toFixed(6)}`;
+}
+
+/**
  * 地理编码结果
  */
 export interface GeocodeResult {
@@ -307,6 +314,27 @@ export async function calculateRoute(
   origin: { lng: number; lat: number },
   destination: { lng: number; lat: number }
 ): Promise<RouteResult> {
+  const cacheKey = getRouteCacheKey(origin, destination);
+
+  // 1. 检查数据库缓存
+  try {
+    const cached = await prisma.routeCache.findUnique({
+      where: { routeKey: cacheKey },
+    });
+
+    if (cached) {
+      return {
+        success: true,
+        distance: cached.distance,
+        duration: cached.duration,
+        source: 'api', // 视为 API 结果
+      };
+    }
+  } catch (error) {
+    console.warn('RouteCache read error:', error);
+  }
+
+  // 2. 调用 API
   if (!AMAP_KEY) {
     return {
       success: false,
@@ -327,12 +355,36 @@ export async function calculateRoute(
 
     if (data.status === '1' && data.route?.paths?.length > 0) {
       const path = data.route.paths[0];
-      return {
+      const result: RouteResult = {
         success: true,
         distance: parseFloat(path.distance) / 1000, // 米转公里
         duration: parseFloat(path.duration) / 3600, // 秒转小时
         source: 'api',
       };
+
+      // 保存到缓存
+      try {
+        await prisma.routeCache.upsert({
+          where: { routeKey: cacheKey },
+          create: {
+            routeKey: cacheKey,
+            originLng: origin.lng,
+            originLat: origin.lat,
+            destLng: destination.lng,
+            destLat: destination.lat,
+            distance: result.distance,
+            duration: result.duration,
+          },
+          update: {
+            hitCount: { increment: 1 },
+            lastUsedAt: new Date(),
+          },
+        });
+      } catch (error) {
+        console.warn('RouteCache write error:', error);
+      }
+
+      return result;
     } else {
       return {
         success: false,
