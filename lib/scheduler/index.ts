@@ -152,35 +152,80 @@ export async function scheduleOrders(
 
     console.log('🚛 可排线订单数:', validOrders.length);
 
-    // ===== 阶段 3 & 4: 执行调度策略 =====
+    // ===== 阶段 3 & 4: 执行调度策略（生成多方案） =====
+    reportProgress(3, '执行调度算法', 55, '正在生成多套可选方案...');
+
     const strategyId = (options as any).strategyId || 'greedy';
     const { solverRegistry } = await import('./strategies/registry');
     const strategy = solverRegistry.get(strategyId) || solverRegistry.get('greedy')!;
 
-    console.log(`🚀 使用调度策略: ${strategy.name}`);
+    const schemes: any[] = [];
 
-    const solverOutput = await strategy.solve({
+    // 方案 A: 成本优先 (允许自动升舱)
+    const costFirstOutput = await strategy.solve({
       orders: validOrders as any,
       depot: depotCoord,
       vehicles,
-      options: opts,
-      onProgress,
+      options: { ...opts, costMode: 'mileage' },
+      onProgress: (p) => reportProgress(4, '生成：成本优先方案', 60 + p.percent * 0.1, p.message),
+    });
+    schemes.push({
+      id: 'cost_optimized',
+      name: '成本优先模式',
+      tag: '省钱',
+      description: '优先使用大车型合并订单，减少总台班数，降低单公里运费。',
+      trips: costFirstOutput.trips,
+      summary: generateSummary(costFirstOutput.trips, ordersWithConstraints, invalidOrders),
+      score: 95
     });
 
-    const allTrips = solverOutput.trips;
+    // 方案 B: 约束优先 (严格执行限小车，自动拆单)
+    const strictOutput = await strategy.solve({
+      orders: validOrders as any,
+      depot: depotCoord,
+      vehicles,
+      options: { ...opts }, // 默认选项，包含我刚优化的自动拆单逻辑
+      onProgress: (p) => reportProgress(4, '生成：严格拆单方案', 70 + p.percent * 0.1, p.message),
+    });
+    schemes.push({
+      id: 'strict_constraint',
+      name: '严格约束模式',
+      tag: '稳健',
+      description: '严格执行订单对车型的限制要求，超限订单自动拆分为多台小车。',
+      trips: strictOutput.trips,
+      summary: generateSummary(strictOutput.trips, ordersWithConstraints, invalidOrders),
+      score: 88
+    });
 
-    // ===== 阶段 5: 生成汇总 =====
-    reportProgress(5, '生成报告', 95, '正在生成汇总报告...');
+    // 方案 C: 时间窗安全 (留更多 Buffer)
+    const safeOutput = await strategy.solve({
+      orders: validOrders as any,
+      depot: depotCoord,
+      vehicles,
+      options: { ...opts, unloadingMinutes: opts.unloadingMinutes + 15 },
+      onProgress: (p) => reportProgress(4, '生成：时间充裕方案', 80 + p.percent * 0.1, p.message),
+    });
+    schemes.push({
+      id: 'time_safe',
+      name: '服务保障模式',
+      tag: '推荐',
+      description: '增加卸货和排队等待冗余时间，大幅降低迟到风险。',
+      trips: safeOutput.trips,
+      summary: generateSummary(safeOutput.trips, ordersWithConstraints, invalidOrders),
+      score: 92
+    });
 
-    const summary = generateSummary(allTrips, ordersWithConstraints, invalidOrders);
+    // 默认展示第一个方案
+    const defaultScheme = schemes[0];
 
-    reportProgress(5, '生成报告', 100, '排线完成！');
+    reportProgress(5, '生成报告', 100, '多套方案排线完成！');
 
     return {
       taskId,
       status: 'completed',
-      trips: allTrips,
-      summary,
+      schemes,
+      trips: defaultScheme.trips,
+      summary: defaultScheme.summary,
       createdAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
     };
@@ -188,6 +233,7 @@ export async function scheduleOrders(
     return {
       taskId,
       status: 'failed',
+      schemes: [],
       trips: [],
       summary: createEmptySummary(),
       createdAt: new Date().toISOString(),

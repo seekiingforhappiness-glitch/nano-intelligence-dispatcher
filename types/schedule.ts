@@ -110,15 +110,32 @@ export interface ScheduleSummary {
 }
 
 /**
+ * 完整调度方案（用于多方案比选）
+ */
+export interface ScheduleScheme {
+  id: string;                    // 'cost_first', 'balanced', 'split_avoidance'
+  name: string;                  // '成本优先', '平衡稳健', '严格拆单'
+  description: string;           // 方案核心策略说明
+  trips: Trip[];
+  summary: ScheduleSummary;
+  tag?: '推荐' | '稳健' | '省钱';
+  score: number;                 // 方案评分 (0-100)
+}
+
+/**
  * 调度结果
  */
 export interface ScheduleResult {
   taskId: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
 
-  // 结果
+  // 多方案结果
+  schemes: ScheduleScheme[];
+
+  // 原有的兼容性字段（指向默认或首个方案）
   trips: Trip[];
   summary: ScheduleSummary;
+
   warehouses?: Array<{ id: string; code: string; name: string }>;
 
   // 时间戳
