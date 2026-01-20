@@ -1,6 +1,7 @@
 'use client';
 
-import { Download, Copy, AlertTriangle, CheckCircle, Truck, Route, Clock, DollarSign } from 'lucide-react';
+import { Download, Copy, AlertTriangle, CheckCircle, Truck, Route, Clock, DollarSign, Star, Info } from 'lucide-react';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { ScheduleResult } from '@/types/schedule';
 import { Card } from '@/components/ui/Card';
@@ -18,7 +19,18 @@ export function ResultDashboard({
   onDownload,
   isDownloading = false,
 }: ResultDashboardProps) {
-  const { summary, trips } = result;
+  const { schemes } = result;
+  const [activeSchemeId, setActiveSchemeId] = useState<string>(schemes?.[0]?.id || 'cost_optimized');
+
+  // 当前激活的方案
+  const activeScheme = schemes?.find(s => s.id === activeSchemeId) || {
+    summary: result.summary,
+    trips: result.trips,
+    name: '默认方案',
+    description: '基础调度方案'
+  };
+
+  const { summary, trips } = activeScheme;
 
   const handleCopySummary = () => {
     const text = generateSummaryText(result);
@@ -27,11 +39,65 @@ export function ResultDashboard({
 
   return (
     <div className="space-y-6">
+      {/* 方案选择 Tabs */}
+      {schemes && schemes.length > 1 && (
+        <div className="bg-dark-900/40 border border-white/5 p-1.5 rounded-2xl flex gap-1">
+          {schemes.map((scheme) => (
+            <button
+              key={scheme.id}
+              onClick={() => setActiveSchemeId(scheme.id)}
+              className={cn(
+                "flex-1 flex flex-col items-center py-3 px-4 rounded-xl transition-all relative overflow-hidden",
+                activeSchemeId === scheme.id
+                  ? "bg-primary/10 border border-primary/20 text-white shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                {scheme.tag && (
+                  <Badge variant="tech" className={cn(
+                    "px-1.5 py-0 text-[10px]",
+                    scheme.tag === '推荐' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20' :
+                      scheme.tag === '省钱' ? 'bg-amber-500/20 text-amber-400 border-amber-500/20' :
+                        'bg-blue-500/20 text-blue-400 border-blue-500/20'
+                  )}>
+                    {scheme.tag}
+                  </Badge>
+                )}
+                <span className="font-bold text-sm">{scheme.name}</span>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] opacity-70">
+                <span className="flex items-center gap-1"><Truck className="w-3 h-3" />{scheme.summary.totalTrips}趟</span>
+                <span className="flex items-center gap-1 font-mono">¥{scheme.summary.totalCost.toLocaleString()}</span>
+              </div>
+              {activeSchemeId === scheme.id && (
+                <div className="absolute top-0 right-0 p-1">
+                  <Star className="w-3 h-3 text-primary fill-primary" />
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 方案说明区 */}
+      <Card variant="outline" className="p-4 bg-primary/5 border-primary/10">
+        <div className="flex gap-3">
+          <Info className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+          <div>
+            <h5 className="text-white font-medium text-sm leading-tight">方案策略导读</h5>
+            <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+              {activeScheme.description}
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* 成功提示 */}
       <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.1)]">
         <CheckCircle className="w-6 h-6 text-emerald-500 flex-shrink-0" />
         <div>
-          <p className="text-emerald-400 font-medium">排线智能调度完成</p>
+          <p className="text-emerald-400 font-medium">排线智能调度完成 - [{activeScheme.name}]</p>
           <p className="text-emerald-400/70 text-sm">
             系统已成功为 <span className="text-white font-mono mx-1">{summary.totalOrders}</span> 个订单生成 <span className="text-white font-mono mx-1">{summary.totalTrips}</span> 个最优车次方案
           </p>
