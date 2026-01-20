@@ -28,57 +28,73 @@ export async function packTrips(
 ): Promise<TempTrip[]> {
   const trips: TempTrip[] = [];
 
-  // 获取全局最大载重能力（用于拆单参考）
-  const maxCap = vehicles.reduce((acc, v) => ({
+  // 获取允许所有车型的最大载重（用于 null 分组）
+  const globalMaxCap = vehicles.reduce((acc, v) => ({
     weight: Math.max(acc.weight, v.maxWeightKg),
     pallets: Math.max(acc.pallets, v.palletSlots),
     volume: Math.max(acc.volume, v.maxVolumeM3 || Infinity)
   }), { weight: 0, pallets: 0, volume: 0 });
 
-  // 1. 预处理：拆分“巨型订单”
-  const processedOrders: Order[] = [];
-  for (const order of orders) {
-    if (order.weightKg > maxCap.weight ||
-      order.effectivePalletSlots > maxCap.pallets ||
-      (order.volumeM3 && order.volumeM3 > maxCap.volume)) {
-
-      // 执行自动拆分逻辑
-      const parts = splitOversizedOrder(order, maxCap);
-      processedOrders.push(...parts);
-    } else {
-      processedOrders.push(order);
-    }
-  }
-
-  // 先分离必须单独成车的订单
-  const singleOnly = processedOrders.filter(o => o.constraints.singleTripOnly);
-  const normalOrders = processedOrders.filter(o => !o.constraints.singleTripOnly);
-
-  // 单独成车的订单
-  for (const order of singleOnly) {
-    trips.push({
-      orders: [order],
-      totalWeightKg: order.weightKg,
-      totalVolumeM3: order.volumeM3 || 0,
-      totalPalletSlots: order.effectivePalletSlots,
-      requiredVehicleType: order.constraints.requiredVehicleType,
-    });
-  }
-
-  // 按车型要求分组普通订单
-  const ordersByVehicleType = groupByVehicleType(normalOrders);
+  // 按车型要求分组普通订单（包含 singleTripOnly 订单的基础处理）
+  const ordersByVehicleType = groupByVehicleType(orders);
 
   // 对每组进行装箱
   for (const [vehicleType, typeOrders] of Object.entries(ordersByVehicleType)) {
-    const packedTrips = await packOrdersIntoTrips(
-      typeOrders,
-      maxStops,
-      vehicles,
-      vehicleType === 'null' ? null : vehicleType,
-      depotCoord,
-      options
-    );
-    trips.push(...packedTrips);
+    const vType = vehicleType === 'null' ? null : vehicleType;
+
+    // 计算该组对应的最大容量限制
+    let groupMaxCap = globalMaxCap;
+    if (vType) {
+      const typeVehicles = vehicles.filter(v => v.enabled && v.category === vType);
+      if (typeVehicles.length > 0) {
+        groupMaxCap = typeVehicles.reduce((acc, v) => ({
+          weight: Math.max(acc.weight, v.maxWeightKg),
+          pallets: Math.max(acc.pallets, v.palletSlots),
+          volume: Math.max(acc.volume, v.maxVolumeM3 || Infinity)
+        }), { weight: 0, pallets: 0, volume: 0 });
+      }
+    }
+
+    // 在本组内执行自动拆分
+    const processedTypeOrders: Order[] = [];
+    for (const order of typeOrders) {
+      if (order.weightKg > groupMaxCap.weight ||
+        order.effectivePalletSlots > groupMaxCap.pallets ||
+        (order.volumeM3 && order.volumeM3 > groupMaxCap.volume)) {
+        const parts = splitOversizedOrder(order, groupMaxCap);
+        processedTypeOrders.push(...parts);
+      } else {
+        processedTypeOrders.push(order);
+      }
+    }
+
+    // 分离必须单独成车的订单
+    const singleOnly = processedTypeOrders.filter(o => o.constraints.singleTripOnly);
+    const normalOrders = processedTypeOrders.filter(o => !o.constraints.singleTripOnly);
+
+    // 处理单独成车的订单
+    for (const order of singleOnly) {
+      trips.push({
+        orders: [order],
+        totalWeightKg: order.weightKg,
+        totalVolumeM3: order.volumeM3 || 0,
+        totalPalletSlots: order.effectivePalletSlots,
+        requiredVehicleType: vType,
+      });
+    }
+
+    // 进行常规装箱
+    if (normalOrders.length > 0) {
+      const packedTrips = await packOrdersIntoTrips(
+        normalOrders,
+        maxStops,
+        vehicles,
+        vType,
+        depotCoord,
+        options
+      );
+      trips.push(...packedTrips);
+    }
   }
 
   return trips;
