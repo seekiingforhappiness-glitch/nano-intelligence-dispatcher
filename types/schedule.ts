@@ -85,6 +85,8 @@ export interface ScheduleSummary {
     fuel: number;
     toll: number;
     labor: number;
+    dropCharges: number;         // 串点费汇总
+    returnEmpty: number;         // 空驶费汇总
     other: number;
   };
 

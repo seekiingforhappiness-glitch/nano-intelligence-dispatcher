@@ -279,6 +279,23 @@ function generateSummary(
   const riskOrders = trips
     .flatMap(t => t.stops.filter(s => !s.isOnTime).map(s => s.order.orderId));
 
+  const costBreakdown = trips.reduce((acc, t) => {
+    if (t.costBreakdown) {
+      acc.fuel += t.costBreakdown.fuel;
+      acc.toll += t.costBreakdown.toll;
+      acc.labor += t.costBreakdown.labor;
+      acc.dropCharges += t.costBreakdown.dropCharges;
+      acc.returnEmpty += t.costBreakdown.returnEmpty;
+      acc.other += t.costBreakdown.other;
+    } else {
+      // 兼容性逻辑
+      acc.fuel += t.estimatedCost * 0.4;
+      acc.toll += t.estimatedCost * 0.3;
+      acc.labor += t.estimatedCost * 0.3;
+    }
+    return acc;
+  }, { fuel: 0, toll: 0, labor: 0, dropCharges: 0, returnEmpty: 0, other: 0 });
+
   return {
     totalOrders: allOrders.length,
     totalTrips: trips.length,
@@ -286,10 +303,12 @@ function generateSummary(
     totalDuration: Math.round(totalDuration * 10) / 10,
     totalCost: Math.round(totalCost),
     costBreakdown: {
-      fuel: Math.round(totalCost * 0.4),
-      toll: Math.round(totalCost * 0.3),
-      labor: Math.round(totalCost * 0.3),
-      other: 0,
+      fuel: Math.round(costBreakdown.fuel),
+      toll: Math.round(costBreakdown.toll),
+      labor: Math.round(costBreakdown.labor),
+      dropCharges: Math.round(costBreakdown.dropCharges),
+      returnEmpty: Math.round(costBreakdown.returnEmpty),
+      other: Math.round(costBreakdown.other),
     },
     avgLoadRateWeight: trips.length > 0
       ? trips.reduce((sum, t) => sum + t.loadRateWeight, 0) / trips.length
@@ -320,7 +339,7 @@ function createEmptySummary(): ScheduleSummary {
     totalDistance: 0,
     totalDuration: 0,
     totalCost: 0,
-    costBreakdown: { fuel: 0, toll: 0, labor: 0, other: 0 },
+    costBreakdown: { fuel: 0, toll: 0, labor: 0, dropCharges: 0, returnEmpty: 0, other: 0 },
     avgLoadRateWeight: 0,
     avgLoadRatePallet: 0,
     vehicleBreakdown: {},
