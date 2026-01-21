@@ -175,7 +175,7 @@ export async function scheduleOrders(
       tag: '省钱',
       description: '优先使用大车型合并订单，减少总台班数，降低单公里运费。',
       trips: costFirstOutput.trips,
-      summary: generateSummary(costFirstOutput.trips, ordersWithConstraints, invalidOrders, (costFirstOutput.summary as any).suggestions),
+      summary: generateSummary(costFirstOutput.trips, ordersWithConstraints, invalidOrders, costFirstOutput.summary.suggestions),
       score: 95
     });
 
@@ -193,7 +193,7 @@ export async function scheduleOrders(
       tag: '稳健',
       description: '严格执行订单对车型的限制要求，超限订单自动拆分为多台小车。',
       trips: strictOutput.trips,
-      summary: generateSummary(strictOutput.trips, ordersWithConstraints, invalidOrders, (strictOutput.summary as any).suggestions),
+      summary: generateSummary(strictOutput.trips, ordersWithConstraints, invalidOrders, strictOutput.summary.suggestions),
       score: 88
     });
 
@@ -211,7 +211,7 @@ export async function scheduleOrders(
       tag: '推荐',
       description: '增加卸货和排队等待冗余时间，大幅降低迟到风险。',
       trips: safeOutput.trips,
-      summary: generateSummary(safeOutput.trips, ordersWithConstraints, invalidOrders, (safeOutput.summary as any).suggestions),
+      summary: generateSummary(safeOutput.trips, ordersWithConstraints, invalidOrders, safeOutput.summary.suggestions),
       score: 92
     });
 
@@ -354,6 +354,7 @@ function createEmptySummary(): ScheduleSummary {
       mustBeLastOrders: 0,
       singleTripOrders: 0,
     },
+    suggestions: [],
   };
 }
 
