@@ -144,7 +144,7 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
             // ===== 阶段 5: 审计与自愈 =====
             reportProgress(5, '方案审计', 90, `正在执行方案合规性检查...`);
             const { auditSchedule } = await import('../auditor');
-            const auditResult = await auditSchedule(allTrips, depotCoord, currentOptions);
+            const auditResult = await auditSchedule(allTrips, depotCoord, currentOptions, vehicles);
 
             if (auditResult.isValid || retryCount === MAX_RETRIES) {
                 finalTrips = allTrips;
