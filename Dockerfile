@@ -30,7 +30,8 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+# 生成 Prisma Client 并构建应用
+RUN npx prisma generate && npm run build
 
 # ======================
 # 运行阶段
@@ -44,8 +45,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN groupadd --gid 1001 nodejs && \
     useradd --uid 1001 --gid nodejs --system nextjs
 
+# 创建数据目录并授权
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+
+# 拷贝构建产物
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+
+RUN chmod +x ./scripts/start.sh
 
 USER nextjs
 
@@ -53,4 +63,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+# 使用脚本启动，以便进行数据库初始化
+CMD ["/bin/sh", "scripts/start.sh"]
