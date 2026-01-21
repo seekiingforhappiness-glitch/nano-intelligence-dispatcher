@@ -109,6 +109,9 @@ export interface ScheduleSummary {
     mustBeLastOrders: number;    // 必须最后送的订单数
     singleTripOrders: number;    // 必须单独成车的订单数
   };
+
+  // 改良建议 (由审计器生成)
+  suggestions?: string[];
 }
 
 /**
@@ -171,6 +174,14 @@ export interface ScheduleOptions {
   unloadingMinutes: number;      // 每站卸货时间（分钟），包含排队等待
   costMode: 'fixed' | 'mileage' | 'weight' | 'hybrid';
   showMarketReference: boolean;
+
+  // 自愈与调优参数 (Internal)
+  tuning?: {
+    overloadTolerance: number;   // 超载容忍度 (0.1 = 110%)
+    stopCountBias: number;       // 串点数偏移量
+    clusterBias: number;         // 聚类灵敏度偏移
+    timeBuffer: number;          // 额外的时间缓冲 (分钟)
+  };
 }
 
 

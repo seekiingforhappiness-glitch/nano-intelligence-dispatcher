@@ -33,133 +33,151 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
             });
         };
 
-        // 已经过预处理的订单在此处应具备坐标和约束
         const ordersToProcess = validOrders as Order[];
 
-        // ===== 阶段 3: 分组 =====
-        reportProgress(3, '区域分组', 55, '正在按区域分组...');
-        const clusters = clusterOrders(ordersToProcess, depotCoord);
-        reportProgress(3, '区域分组', 60, `已分为 ${clusters.length} 个区域组`);
+        let retryCount = 0;
+        const MAX_RETRIES = 2; // 最多重试2次（共3次尝试）
+        let currentOptions = { ...opts };
+        let finalTrips: Trip[] = [];
+        let finalSuggestions: string[] = [];
 
-        // ===== 阶段 4: 装箱与路径优化 =====
-        reportProgress(4, '排线优化', 65, '正在生成车次...');
-        const allTrips: Trip[] = [];
-        let tripIndex = 1;
+        while (retryCount <= MAX_RETRIES) {
+            const attemptMessage = retryCount > 0 ? ` (第 ${retryCount + 1} 次尝试)` : '';
 
-        for (const cluster of clusters) {
-            // 装箱（现在是异步的，并包含时间窗硬约束检查）
-            const tempTrips = await packTrips(cluster.orders, opts.maxStops, vehicles, depotCoord, opts);
+            // ===== 阶段 3: 分组 =====
+            reportProgress(3, '区域分组', 55, `正在按区域分组${attemptMessage}...`);
+            const clusters = clusterOrders(ordersToProcess, depotCoord);
 
-            for (const tempTrip of tempTrips) {
-                // 路径优化
-                const optimizedOrders = optimizeRoute(tempTrip.orders, depotCoord);
+            // ===== 阶段 4: 装箱与路径优化 =====
+            const allTrips: Trip[] = [];
+            let tripIndex = 1;
 
-                // 计算距离
-                const totalDistance = estimateRoadDistance(
-                    calculateTotalDistance(optimizedOrders, depotCoord)
-                );
-                const segmentDistances = calculateSegmentDistances(optimizedOrders, depotCoord);
+            for (const cluster of clusters) {
+                const tempTrips = await packTrips(cluster.orders, currentOptions.maxStops, vehicles, depotCoord, currentOptions);
 
-                // 选择车型
-                const vehicleResult = selectVehicle(
-                    tempTrip,
-                    vehicles,
-                    totalDistance,
-                    opts.costMode as CostMode
-                );
+                for (const tempTrip of tempTrips) {
+                    const optimizedOrders = optimizeRoute(tempTrip.orders, depotCoord);
+                    const totalDistance = estimateRoadDistance(calculateTotalDistance(optimizedOrders, depotCoord));
+                    const segmentDistances = calculateSegmentDistances(optimizedOrders, depotCoord);
 
-                // 生成停靠点
-                const stops: TripStop[] = [];
-                let cumulativeDistance = 0;
-                let cumulativeDuration = 0;
-                const [startHour, startMin] = opts.startTime.split(':').map(Number);
-                let currentTime = startHour * 60 + (startMin || 0); // 分钟
+                    const vehicleResult = selectVehicle(tempTrip, vehicles, totalDistance, currentOptions.costMode as CostMode);
 
-                for (let i = 0; i < optimizedOrders.length; i++) {
-                    const order = optimizedOrders[i];
-                    const segmentDist = estimateRoadDistance(segmentDistances[i] || 0);
-                    const segmentDur = estimateDuration(segmentDist) * 60; // 转分钟
+                    const stops: TripStop[] = [];
+                    let cumulativeDistance = 0;
+                    let cumulativeDuration = 0;
+                    const [startHour, startMin] = currentOptions.startTime.split(':').map(Number);
+                    let currentTime = startHour * 60 + (startMin || 0);
 
-                    cumulativeDistance += segmentDist;
-                    cumulativeDuration += segmentDur;
-                    currentTime += segmentDur;
+                    for (let i = 0; i < optimizedOrders.length; i++) {
+                        const order = optimizedOrders[i];
+                        const segmentDist = estimateRoadDistance(segmentDistances[i] || 0);
+                        const segmentDur = estimateDuration(segmentDist) * 60;
 
-                    // 检查时间窗
-                    const deadlineMin = parseTime(opts.deadline);
-                    const isOnTime = currentTime <= deadlineMin;
-                    const timeWindow = order.constraints.timeWindow;
-                    let delayMinutes: number | undefined;
+                        cumulativeDistance += segmentDist;
+                        cumulativeDuration += segmentDur;
+                        currentTime += segmentDur;
 
-                    if (timeWindow) {
-                        const windowEnd = parseTime(timeWindow.end);
-                        if (currentTime > windowEnd) {
-                            delayMinutes = currentTime - windowEnd;
+                        const deadlineMin = parseTime(currentOptions.deadline);
+                        const isOnTime = currentTime <= deadlineMin;
+                        const timeWindow = order.constraints.timeWindow;
+                        let delayMinutes: number | undefined;
+
+                        if (timeWindow) {
+                            const windowEnd = parseTime(timeWindow.end);
+                            if (currentTime > windowEnd) {
+                                delayMinutes = currentTime - windowEnd;
+                            }
                         }
+
+                        stops.push({
+                            sequence: i + 1,
+                            order,
+                            eta: formatTime(currentTime),
+                            etd: formatTime(currentTime + currentOptions.unloadingMinutes),
+                            distanceFromPrev: segmentDist,
+                            durationFromPrev: segmentDur / 60,
+                            cumulativeDistance,
+                            cumulativeDuration: cumulativeDuration / 60,
+                            isOnTime: isOnTime && !delayMinutes,
+                            delayMinutes,
+                        });
+
+                        currentTime += currentOptions.unloadingMinutes;
                     }
 
-                    stops.push({
-                        sequence: i + 1,
-                        order,
-                        eta: formatTime(currentTime),
-                        etd: formatTime(currentTime + opts.unloadingMinutes),
-                        distanceFromPrev: segmentDist,
-                        durationFromPrev: segmentDur / 60, // 转小时
-                        cumulativeDistance,
-                        cumulativeDuration: cumulativeDuration / 60,
-                        isOnTime: isOnTime && !delayMinutes,
-                        delayMinutes,
+                    const lastOrder = optimizedOrders[optimizedOrders.length - 1];
+                    const returnDistance = lastOrder?.coordinates
+                        ? estimateRoadDistance(haversineDistance(
+                            lastOrder.coordinates.lat, lastOrder.coordinates.lng,
+                            depotCoord.lat, depotCoord.lng
+                        ))
+                        : 0;
+                    const returnDuration = estimateDuration(returnDistance) * 60;
+                    currentTime += returnDuration;
+
+                    allTrips.push({
+                        tripId: `T${String(tripIndex++).padStart(3, '0')}`,
+                        vehicleType: vehicleResult.vehicle.name,
+                        stops,
+                        departureTime: currentOptions.startTime,
+                        returnTime: formatTime(currentTime),
+                        totalDistance: cumulativeDistance + returnDistance,
+                        totalDuration: (cumulativeDuration + returnDuration) / 60,
+                        totalWeightKg: tempTrip.totalWeightKg,
+                        totalPalletSlots: tempTrip.totalPalletSlots,
+                        loadRateWeight: vehicleResult.loadRateWeight,
+                        loadRatePallet: vehicleResult.loadRatePallet,
+                        estimatedCost: vehicleResult.cost,
+                        costBreakdown: vehicleResult.costBreakdown,
+                        isValid: stops.every(s => s.isOnTime) &&
+                            tempTrip.totalWeightKg <= vehicleResult.vehicle.maxWeightKg * 1.1 && // 允许10%容忍
+                            tempTrip.totalPalletSlots <= vehicleResult.vehicle.palletSlots,
+                        hasRisk: stops.some(s => !s.isOnTime) ||
+                            tempTrip.totalWeightKg > vehicleResult.vehicle.maxWeightKg ||
+                            tempTrip.totalPalletSlots > vehicleResult.vehicle.palletSlots,
+                        riskStops: stops.filter(s => !s.isOnTime).map(s => s.sequence),
+                        reason: vehicleResult.reason,
                     });
-
-                    currentTime += opts.unloadingMinutes; // 卸货时间
                 }
-
-                // 计算返回时间
-                const lastOrder = optimizedOrders[optimizedOrders.length - 1];
-                const returnDistance = lastOrder?.coordinates
-                    ? estimateRoadDistance(haversineDistance(
-                        lastOrder.coordinates.lat, lastOrder.coordinates.lng,
-                        depotCoord.lat, depotCoord.lng
-                    ))
-                    : 0;
-                const returnDuration = estimateDuration(returnDistance) * 60;
-                currentTime += returnDuration;
-
-                const trip: Trip = {
-                    tripId: `T${String(tripIndex++).padStart(3, '0')}`,
-                    vehicleType: vehicleResult.vehicle.name,
-                    stops,
-                    departureTime: opts.startTime,
-                    returnTime: formatTime(currentTime),
-                    totalDistance: cumulativeDistance + returnDistance,
-                    totalDuration: (cumulativeDuration + returnDuration) / 60,
-                    totalWeightKg: tempTrip.totalWeightKg,
-                    totalPalletSlots: tempTrip.totalPalletSlots,
-                    loadRateWeight: vehicleResult.loadRateWeight,
-                    loadRatePallet: vehicleResult.loadRatePallet,
-                    estimatedCost: vehicleResult.cost,
-                    costBreakdown: vehicleResult.costBreakdown,
-                    isValid: stops.every(s => s.isOnTime) &&
-                        tempTrip.totalWeightKg <= vehicleResult.vehicle.maxWeightKg &&
-                        tempTrip.totalPalletSlots <= vehicleResult.vehicle.palletSlots,
-                    hasRisk: stops.some(s => !s.isOnTime) ||
-                        tempTrip.totalWeightKg > vehicleResult.vehicle.maxWeightKg ||
-                        tempTrip.totalPalletSlots > vehicleResult.vehicle.palletSlots,
-                    riskStops: stops.filter(s => !s.isOnTime).map(s => s.sequence),
-                    reason: vehicleResult.reason,
-                };
-
-                allTrips.push(trip);
             }
 
-            const progress = 65 + Math.round((clusters.indexOf(cluster) / clusters.length) * 25);
-            reportProgress(4, '排线优化', progress, `已处理 ${clusters.indexOf(cluster) + 1}/${clusters.length} 个区域`);
+            // ===== 阶段 5: 审计与自愈 =====
+            reportProgress(5, '方案审计', 90, `正在执行方案合规性检查...`);
+            const { auditSchedule } = await import('../auditor');
+            const auditResult = await auditSchedule(allTrips, depotCoord, currentOptions);
+
+            if (auditResult.isValid || retryCount === MAX_RETRIES) {
+                finalTrips = allTrips;
+                finalSuggestions = auditResult.suggestions;
+                break;
+            }
+
+            // 针对问题进行调优
+            reportProgress(5, '自动改进', 92, `检测到排线缺陷，正在自动优化参数重试...`);
+            retryCount++;
+
+            const tuning = currentOptions.tuning || { overloadTolerance: 0.1, stopCountBias: 0, clusterBias: 0, timeBuffer: 0 };
+
+            // 如果是严重超载或时效冲突，减小串点数限制或增加缓冲
+            if (auditResult.issues.some(i => i.type === 'overload' || i.type === 'time_conflict')) {
+                tuning.stopCountBias -= 1;
+                tuning.timeBuffer += 15;
+            }
+            // 如果是低效，尝试增加点数或放宽合并
+            if (auditResult.issues.some(i => i.type === 'inefficient')) {
+                tuning.stopCountBias += 1;
+            }
+
+            currentOptions = { ...currentOptions, tuning };
         }
 
-        // 汇总逻辑将由 index.ts 统一处理，此处返回基础结果
         return {
-            trips: allTrips,
-            summary: {} as any, // 占位，由外层 generateSummary 生成
-            invalidOrders: [], // 占位
+            trips: finalTrips,
+            summary: {
+                // 扩展字段
+                suggestions: finalSuggestions
+            } as any,
+            invalidOrders: [],
         };
     }
 }

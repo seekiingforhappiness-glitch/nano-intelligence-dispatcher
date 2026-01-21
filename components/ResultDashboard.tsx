@@ -194,27 +194,48 @@ export function ResultDashboard({
         </div>
       </Card>
 
-      {/* 风险提示 */}
-      {(summary.riskOrders.length > 0 || summary.invalidOrders.length > 0) && (
-        <Card variant="outline" className="p-4 border-yellow-500/30 bg-yellow-500/5">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-yellow-400 font-medium">调度风险预警</p>
-              {summary.riskOrders.length > 0 && (
-                <p className="text-yellow-400/80 text-sm mt-1">
-                  <span className="font-bold">{summary.riskOrders.length}</span> 单可能存在延误风险：
-                  <span className="opacity-80 ml-1">{summary.riskOrders.slice(0, 5).join(', ')}</span>
-                  {summary.riskOrders.length > 5 && ' ...'}
-                </p>
-              )}
-              {summary.invalidOrders.length > 0 && (
-                <p className="text-yellow-400/80 text-sm mt-1">
-                  <span className="font-bold">{summary.invalidOrders.length}</span> 单地址解析失败，无法自动排线
-                </p>
-              )}
+      {/* 风险与建议提示 */}
+      {(summary.riskOrders.length > 0 || summary.invalidOrders.length > 0 || (summary.suggestions && summary.suggestions.length > 0)) && (
+        <Card variant="outline" className="p-4 border-yellow-500/30 bg-yellow-500/5 space-y-4">
+          {/* 风险预警 */}
+          {(summary.riskOrders.length > 0 || summary.invalidOrders.length > 0) && (
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-yellow-400 font-medium">调度风险预警</p>
+                {summary.riskOrders.length > 0 && (
+                  <p className="text-yellow-400/80 text-sm mt-1">
+                    <span className="font-bold">{summary.riskOrders.length}</span> 单可能存在延误风险：
+                    <span className="opacity-80 ml-1">{summary.riskOrders.slice(0, 5).join(', ')}</span>
+                    {summary.riskOrders.length > 5 && ' ...'}
+                  </p>
+                )}
+                {summary.invalidOrders.length > 0 && (
+                  <p className="text-yellow-400/80 text-sm mt-1">
+                    <span className="font-bold">{summary.invalidOrders.length}</span> 单地址解析失败，无法自动排线
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* 智能建议 */}
+          {summary.suggestions && summary.suggestions.length > 0 && (
+            <div className="flex items-start gap-3 pt-3 border-t border-yellow-500/10">
+              <Star className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-primary font-medium">调度改良建议 (AI 自愈引擎反馈)</p>
+                <ul className="mt-2 space-y-1.5">
+                  {summary.suggestions.map((s, idx) => (
+                    <li key={idx} className="text-slate-300 text-sm flex gap-2">
+                      <span className="text-primary">•</span>
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 

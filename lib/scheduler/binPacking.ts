@@ -28,24 +28,24 @@ export async function packTrips(
 ): Promise<TempTrip[]> {
   const trips: TempTrip[] = [];
 
-  // 获取允许所有车型的最大载重（用于 null 分组）
+  // 获取允许所有车型的最大载重（兜底用）
   const globalMaxCap = vehicles.reduce((acc, v) => ({
     weight: Math.max(acc.weight, v.maxWeightKg),
     pallets: Math.max(acc.pallets, v.palletSlots),
     volume: Math.max(acc.volume, v.maxVolumeM3 || Infinity)
   }), { weight: 0, pallets: 0, volume: 0 });
 
-  // 按车型要求分组普通订单（包含 singleTripOnly 订单的基础处理）
+  // 按车型要求分组
   const ordersByVehicleType = groupByVehicleType(orders);
 
-  // 对每组进行装箱
   for (const [vehicleType, typeOrders] of Object.entries(ordersByVehicleType)) {
     const vType = vehicleType === 'null' ? null : vehicleType;
 
-    // 计算该组对应的最大容量限制
+    // 精确寻找该组车型要求的载重上限
     let groupMaxCap = globalMaxCap;
     if (vType) {
-      const typeVehicles = vehicles.filter(v => v.enabled && v.category === vType);
+      // 尝试匹配 category 或 name (用户可能在 Excel 里写的是 3.8米 而不是 厢式)
+      const typeVehicles = vehicles.filter(v => v.enabled && (v.category === vType || v.name === vType));
       if (typeVehicles.length > 0) {
         groupMaxCap = typeVehicles.reduce((acc, v) => ({
           weight: Math.max(acc.weight, v.maxWeightKg),
@@ -55,7 +55,7 @@ export async function packTrips(
       }
     }
 
-    // 在本组内执行自动拆分
+    // 第一步：拆分超大订单（确保之后每单都能塞进对应的最大车模型）
     const processedTypeOrders: Order[] = [];
     for (const order of typeOrders) {
       if (order.weightKg > groupMaxCap.weight ||
@@ -68,11 +68,11 @@ export async function packTrips(
       }
     }
 
-    // 分离必须单独成车的订单
+    // 分离约束订单
     const singleOnly = processedTypeOrders.filter(o => o.constraints.singleTripOnly);
     const normalOrders = processedTypeOrders.filter(o => !o.constraints.singleTripOnly);
 
-    // 处理单独成车的订单
+    // 处理单独成车
     for (const order of singleOnly) {
       trips.push({
         orders: [order],
@@ -83,7 +83,7 @@ export async function packTrips(
       });
     }
 
-    // 进行常规装箱
+    // 第二步：执行装箱核心逻辑
     if (normalOrders.length > 0) {
       const packedTrips = await packOrdersIntoTrips(
         normalOrders,
@@ -118,7 +118,7 @@ function groupByVehicleType(orders: Order[]): Record<string, Order[]> {
 }
 
 /**
- * 将订单装箱到车次
+ * 将订单装箱到车次的核心逻辑（支持 First-Fit 策略与动态调优）
  */
 async function packOrdersIntoTrips(
   orders: Order[],
@@ -128,20 +128,21 @@ async function packOrdersIntoTrips(
   depotCoord: { lng: number; lat: number },
   options: ScheduleOptions
 ): Promise<TempTrip[]> {
-  const trips: TempTrip[] = [];
+  const resultTrips: TempTrip[] = [];
+  const tuning = options.tuning;
+  const effectiveMaxStops = maxStops + (tuning?.stopCountBias || 0);
 
-  // 获取最大车型容量作为参考
+  // 获取该组可用的最大车型
   const availableVehicles = requiredVehicleType
-    ? vehicles.filter(v => v.enabled && v.category === requiredVehicleType)
+    ? vehicles.filter(v => v.enabled && (v.category === requiredVehicleType || v.name === requiredVehicleType))
     : vehicles.filter(v => v.enabled);
 
   if (availableVehicles.length === 0) {
-    // 没有可用车型，每单独立成车
-    return orders.map(order => ({
-      orders: [order],
-      totalWeightKg: order.weightKg,
-      totalVolumeM3: order.volumeM3 || 0,
-      totalPalletSlots: order.effectivePalletSlots,
+    return orders.map(o => ({
+      orders: [o],
+      totalWeightKg: o.weightKg,
+      totalVolumeM3: o.volumeM3 || 0,
+      totalPalletSlots: o.effectivePalletSlots,
       requiredVehicleType,
     }));
   }
@@ -151,145 +152,104 @@ async function packOrdersIntoTrips(
     availableVehicles[0]
   );
 
-  // 按时间窗结束时间排序（紧急的先处理）
-  const sortedOrders = [...orders].sort((a, b) => {
+  // 排序：优先处理时间紧和重量大的订单
+  const orderPool = [...orders].sort((a, b) => {
+    // 1. 时间窗更紧的优先
     const aEnd = a.constraints.timeWindow?.end || '23:59';
     const bEnd = b.constraints.timeWindow?.end || '23:59';
-    return aEnd.localeCompare(bEnd);
+    if (aEnd !== bEnd) return aEnd.localeCompare(bEnd);
+    // 2. 载重大的优先（方便装箱）
+    return b.weightKg - a.weightKg;
   });
 
-  // 分离 mustBeLast 订单
-  const mustBeLast = sortedOrders.filter(o => o.constraints.mustBeLast);
-  const mustBeFirst = sortedOrders.filter(o => o.constraints.mustBeFirst);
-  const normal = sortedOrders.filter(
-    o => !o.constraints.mustBeLast && !o.constraints.mustBeFirst
-  );
+  const mustBeFirst = orderPool.filter(o => o.constraints.mustBeFirst);
+  const mustBeLast = orderPool.filter(o => o.constraints.mustBeLast);
+  let normalArr = orderPool.filter(o => !o.constraints.mustBeFirst && !o.constraints.mustBeLast);
 
-  // 贪心装箱
-  let currentTrip: TempTrip = {
-    orders: [],
-    totalWeightKg: 0,
-    totalVolumeM3: 0,
-    totalPalletSlots: 0,
-    requiredVehicleType,
-  };
+  // 循环直到池空
+  while (mustBeFirst.length > 0 || normalArr.length > 0 || mustBeLast.length > 0) {
+    let currentTrip: TempTrip = {
+      orders: [],
+      totalWeightKg: 0,
+      totalVolumeM3: 0,
+      totalPalletSlots: 0,
+      requiredVehicleType,
+    };
 
-  // 添加 mustBeFirst 订单到车次开头
-  const firstPool = [...mustBeFirst];
-  const lastPool = [...mustBeLast];
-  const normalPool = [...normal];
-
-  while (firstPool.length > 0 || normalPool.length > 0 || lastPool.length > 0) {
-    // 检查是否需要新车次
-    const needNewTrip =
-      currentTrip.orders.length >= maxStops - (lastPool.length > 0 ? 1 : 0) ||
-      currentTrip.totalWeightKg >= maxVehicle.maxWeightKg * 0.95 ||
-      currentTrip.totalPalletSlots >= maxVehicle.palletSlots;
-
-    if (needNewTrip && currentTrip.orders.length > 0) {
-      // 在结束前添加一个 mustBeLast（如果有）
-      if (lastPool.length > 0) {
-        const lastOrder = lastPool.shift()!;
-        currentTrip.orders.push(lastOrder);
-        currentTrip.totalWeightKg += lastOrder.weightKg;
-        currentTrip.totalVolumeM3 += lastOrder.volumeM3 || 0;
-        currentTrip.totalPalletSlots += lastOrder.effectivePalletSlots;
-      }
-      trips.push(currentTrip);
-      currentTrip = {
-        orders: [],
-        totalWeightKg: 0,
-        totalVolumeM3: 0,
-        totalPalletSlots: 0,
-        requiredVehicleType,
-      };
-    }
-
-    // 优先添加 mustBeFirst
-    if (firstPool.length > 0 && currentTrip.orders.length === 0) {
-      const firstOrder = firstPool.shift()!;
-      if (await canAddOrder(currentTrip, firstOrder, maxVehicle, maxStops, depotCoord, options)) {
-        currentTrip.orders.push(firstOrder);
-        currentTrip.totalWeightKg += firstOrder.weightKg;
-        currentTrip.totalVolumeM3 += firstOrder.volumeM3 || 0;
-        currentTrip.totalPalletSlots += firstOrder.effectivePalletSlots;
-      } else {
-        // 无法添加，单独成车
-        trips.push({
-          orders: [firstOrder],
-          totalWeightKg: firstOrder.weightKg,
-          totalVolumeM3: firstOrder.volumeM3 || 0,
-          totalPalletSlots: firstOrder.effectivePalletSlots,
-          requiredVehicleType,
-        });
-      }
-      continue;
-    }
-
-    // 添加普通订单
-    if (normalPool.length > 0) {
-      const order = normalPool.shift()!;
-      if (await canAddOrder(currentTrip, order, maxVehicle, maxStops - 1, depotCoord, options)) {
+    // 1. 先尝试塞入 mustBeFirst
+    if (mustBeFirst.length > 0) {
+      const order = mustBeFirst[0];
+      if (await canAddOrder(currentTrip, order, maxVehicle, effectiveMaxStops, depotCoord, options)) {
         currentTrip.orders.push(order);
         currentTrip.totalWeightKg += order.weightKg;
         currentTrip.totalVolumeM3 += order.volumeM3 || 0;
         currentTrip.totalPalletSlots += order.effectivePalletSlots;
+        mustBeFirst.shift();
+      }
+    }
+
+    // 2. 尝试塞入 normal (First-Fit 策略)
+    let i = 0;
+    while (i < normalArr.length) {
+      const order = normalArr[i];
+      const maxNormalStops = mustBeLast.length > 0 ? effectiveMaxStops - 1 : effectiveMaxStops;
+
+      if (await canAddOrder(currentTrip, order, maxVehicle, maxNormalStops, depotCoord, options)) {
+        currentTrip.orders.push(order);
+        currentTrip.totalWeightKg += order.weightKg;
+        currentTrip.totalVolumeM3 += order.volumeM3 || 0;
+        currentTrip.totalPalletSlots += order.effectivePalletSlots;
+        normalArr.splice(i, 1);
       } else {
-        // 当前车次已满，开始新车次
-        if (currentTrip.orders.length > 0) {
-          // 添加 mustBeLast
-          if (lastPool.length > 0) {
-            const lastOrder = lastPool.shift()!;
-            currentTrip.orders.push(lastOrder);
-            currentTrip.totalWeightKg += lastOrder.weightKg;
-            currentTrip.totalVolumeM3 += lastOrder.volumeM3 || 0;
-            currentTrip.totalPalletSlots += lastOrder.effectivePalletSlots;
-          }
-          trips.push(currentTrip);
+        i++;
+      }
+
+      const tolerance = 1 + (tuning?.overloadTolerance || 0);
+      if (currentTrip.orders.length >= maxNormalStops || currentTrip.totalWeightKg >= maxVehicle.maxWeightKg * tolerance) {
+        break;
+      }
+    }
+
+    // 3. 最后锁定一个 mustBeLast
+    if (mustBeLast.length > 0 && currentTrip.orders.length < effectiveMaxStops) {
+      for (let j = 0; j < mustBeLast.length; j++) {
+        if (await canAddOrder(currentTrip, mustBeLast[j], maxVehicle, effectiveMaxStops, depotCoord, options)) {
+          const order = mustBeLast[j];
+          currentTrip.orders.push(order);
+          currentTrip.totalWeightKg += order.weightKg;
+          currentTrip.totalVolumeM3 += order.volumeM3 || 0;
+          currentTrip.totalPalletSlots += order.effectivePalletSlots;
+          mustBeLast.splice(j, 1);
+          break;
         }
-        currentTrip = {
-          orders: [order],
-          totalWeightKg: order.weightKg,
-          totalVolumeM3: order.volumeM3 || 0,
-          totalPalletSlots: order.effectivePalletSlots,
-          requiredVehicleType,
-        };
       }
-      continue;
     }
 
-    // 只剩 mustBeLast
-    if (lastPool.length > 0) {
-      const lastOrder = lastPool.shift()!;
-      if (await canAddOrder(currentTrip, lastOrder, maxVehicle, maxStops, depotCoord, options)) {
-        currentTrip.orders.push(lastOrder);
-        currentTrip.totalWeightKg += lastOrder.weightKg;
-        currentTrip.totalVolumeM3 += lastOrder.volumeM3 || 0;
-        currentTrip.totalPalletSlots += lastOrder.effectivePalletSlots;
-      } else if (currentTrip.orders.length > 0) {
-        trips.push(currentTrip);
-        currentTrip = {
-          orders: [lastOrder],
-          totalWeightKg: lastOrder.weightKg,
-          totalVolumeM3: lastOrder.volumeM3 || 0,
-          totalPalletSlots: lastOrder.effectivePalletSlots,
-          requiredVehicleType,
-        };
+    if (currentTrip.orders.length === 0) {
+      const pools = [mustBeFirst, normalArr, mustBeLast];
+      for (const pool of pools) {
+        if (pool.length > 0) {
+          const o = pool.shift()!;
+          resultTrips.push({
+            orders: [o],
+            totalWeightKg: o.weightKg,
+            totalVolumeM3: o.volumeM3 || 0,
+            totalPalletSlots: o.effectivePalletSlots,
+            requiredVehicleType,
+          });
+          break;
+        }
       }
+    } else {
+      resultTrips.push(currentTrip);
     }
   }
 
-  // 处理最后一个车次
-  if (currentTrip.orders.length > 0) {
-    trips.push(currentTrip);
-  }
-
-  return trips;
+  return resultTrips;
 }
 
 /**
  * 检查是否可以添加订单到当前车次
- * 包含：物理载量检查 和 时间窗可行性检查
  */
 async function canAddOrder(
   trip: TempTrip,
@@ -299,12 +259,14 @@ async function canAddOrder(
   depotCoord: { lng: number; lat: number },
   options: ScheduleOptions
 ): Promise<boolean> {
-  // 1. 基础载量检查
+  const tolerance = 1 + (options.tuning?.overloadTolerance || 0);
+
+  // 1. 基础载量检查 (支持容忍度)
   const isPhysicallyPossible = (
     trip.orders.length < maxStops &&
-    trip.totalWeightKg + order.weightKg <= maxVehicle.maxWeightKg &&
-    (trip.totalVolumeM3 + (order.volumeM3 || 0) <= (maxVehicle.maxVolumeM3 || Infinity)) &&
-    trip.totalPalletSlots + order.effectivePalletSlots <= maxVehicle.palletSlots
+    trip.totalWeightKg + order.weightKg <= maxVehicle.maxWeightKg * tolerance &&
+    (trip.totalVolumeM3 + (order.volumeM3 || 0) <= (maxVehicle.maxVolumeM3 || Infinity) * tolerance) &&
+    trip.totalPalletSlots + order.effectivePalletSlots <= maxVehicle.palletSlots // 托盘通常不能超
   );
 
   if (!isPhysicallyPossible) return false;
@@ -320,7 +282,7 @@ async function canAddOrder(
 }
 
 /**
- * 验证订单序列是否在给定的时间窗内可行
+ * 验证订单序列时间窗可行性
  */
 async function checkTimeWindowFeasibility(
   orders: Order[],
@@ -329,7 +291,7 @@ async function checkTimeWindowFeasibility(
 ): Promise<boolean> {
   if (orders.length === 0) return true;
 
-  // 对测试序列进行路径优化
+  const tuning = options.tuning;
   const optimized = optimizeRoute(orders, depotCoord);
   const segments = calculateSegmentDistances(optimized, depotCoord);
 
@@ -339,30 +301,28 @@ async function checkTimeWindowFeasibility(
   for (let i = 0; i < optimized.length; i++) {
     const order = optimized[i];
     const segmentDist = estimateRoadDistance(segments[i] || 0);
-    const segmentDur = estimateDuration(segmentDist) * 60; // 分钟
+    const segmentDur = estimateDuration(segmentDist) * 60;
 
     currentTime += segmentDur;
 
-    // 检查是否超过该订单的时间窗
     if (order.constraints.timeWindow) {
       const [endH, endM] = order.constraints.timeWindow.end.split(':').map(Number);
       const deadline = endH * 60 + (endM || 0);
 
-      if (currentTime > deadline) {
-        return false; // 硬约束失败
+      // 这里的硬性跳出增加一个 timeBuffer 容忍度
+      if (currentTime > deadline + (tuning?.timeBuffer || 0)) {
+        return false;
       }
     }
 
-    // 加上卸货时间
     currentTime += options.unloadingMinutes;
   }
 
-  // 允许在回仓库前超时（通常仓库没有严格回程关闭时间，或由另外的约束处理）
   return true;
 }
 
 /**
- * 将超过车辆上限的“巨型订单”拆分为多个子订单
+ * 将超过车辆限制的订单拆分
  */
 function splitOversizedOrder(order: Order, maxCap: { weight: number, pallets: number, volume: number }): Order[] {
   const parts: Order[] = [];
@@ -372,20 +332,18 @@ function splitOversizedOrder(order: Order, maxCap: { weight: number, pallets: nu
   let partIndex = 1;
 
   while (remainingWeight > 0.01 || remainingPallets > 0.01 || remainingVolume > 0.01) {
-    // 计算本次拆分能拿走的最大份额
-    const splitWeight = Math.min(remainingWeight, maxCap.weight * 0.98); // 留 2% 余地避免浮点误差
+    const splitWeight = Math.min(remainingWeight, maxCap.weight * 0.98);
     const splitPallets = Math.min(remainingPallets, maxCap.pallets);
     const splitVolume = remainingVolume > 0 ? Math.min(remainingVolume, maxCap.volume * 0.98) : 0;
 
     parts.push({
       ...order,
       orderId: `${order.orderId}_part${partIndex}`,
-      // 保持原始订单号，但加上后缀
       orderNumber: `${order.orderNumber}-${partIndex}`,
       weightKg: splitWeight,
       effectivePalletSlots: splitPallets,
       volumeM3: splitVolume > 0 ? splitVolume : undefined,
-      cleaningWarnings: [...order.cleaningWarnings, `超巨型订单已自动拆分为第 ${partIndex} 部分`],
+      cleaningWarnings: [...order.cleaningWarnings, `超大订单已自动拆分为第 ${partIndex} 部分`],
     });
 
     remainingWeight -= splitWeight;
@@ -393,11 +351,8 @@ function splitOversizedOrder(order: Order, maxCap: { weight: number, pallets: nu
     remainingVolume -= splitVolume;
     partIndex++;
 
-    // 防止极端情况下的死循环
     if (partIndex > 100) break;
   }
 
   return parts;
 }
-
-

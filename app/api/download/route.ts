@@ -136,6 +136,18 @@ export async function POST(request: NextRequest) {
     const wsVehicle = XLSX.utils.json_to_sheet(vehicleData);
     XLSX.utils.book_append_sheet(wb, wsVehicle, '车型分布');
 
+    // 改良建议表
+    if (result.summary.suggestions && result.summary.suggestions.length > 0) {
+      const suggestionData = result.summary.suggestions.map((s, idx) => ({
+        '序号': idx + 1,
+        '改良建议': s,
+        '来源': 'AI 调度自愈引擎'
+      }));
+      const wsSuggestions = XLSX.utils.json_to_sheet(suggestionData);
+      wsSuggestions['!cols'] = [{ wch: 10 }, { wch: 80 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, wsSuggestions, '改良建议与反馈');
+    }
+
     // 导出为 buffer
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
