@@ -1,4 +1,5 @@
 import { Order } from '@/types/order';
+import { ScheduleOptions } from '@/types/schedule';
 import { calculateAngle, haversineDistance } from '@/lib/utils/haversine';
 
 /**
@@ -180,10 +181,16 @@ export function clusterOrdersByDistance(
  */
 export function clusterOrders(
   orders: Order[],
-  depotCoord: { lng: number; lat: number }
+  depotCoord: { lng: number; lat: number },
+  options?: ScheduleOptions
 ): OrderCluster[] {
-  // 使用极坐标扫描法
-  return clusterOrdersBySweep(orders, depotCoord, 45);
+  const tuning = options?.tuning;
+  // 🎯 架构联动：根据 clusterBias 动态调整分组广度
+  // clusterBias 默认为 0，范围通常在 0-1 之间
+  const dynamicSpan = 90 + (tuning?.clusterBias || 0) * 180;
+
+  // 使用极坐标扫描法，动态扩大跨度以利于干线/大车拼单
+  return clusterOrdersBySweep(orders, depotCoord, Math.min(360, dynamicSpan));
 }
 
 

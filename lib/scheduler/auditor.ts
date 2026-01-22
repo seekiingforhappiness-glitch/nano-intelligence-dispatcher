@@ -66,8 +66,8 @@ export async function auditSchedule(
             totalScore -= 5;
         }
 
-        // 2. 低效检查 (长途轻载 或 被选车逻辑标记为低效)
-        if ((trip.totalDistance > 50 && loadRate < 0.4) || (trip.reason || '').includes('效率低下')) {
+        // 2. 低效检查 (短途或长途但装载率极低)
+        if ((trip.totalDistance > 20 && loadRate < 0.4) || (trip.reason || '').includes('效率低下')) {
             issues.push({
                 tripId: trip.tripId,
                 type: 'inefficient',

@@ -46,7 +46,7 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
 
             // ===== 阶段 3: 分组 =====
             reportProgress(3, '区域分组', 55, `正在按区域分组${attemptMessage}...`);
-            const clusters = clusterOrders(ordersToProcess, depotCoord);
+            const clusters = clusterOrders(ordersToProcess, depotCoord, currentOptions);
 
             // ===== 阶段 4: 装箱与路径优化 =====
             const allTrips: Trip[] = [];

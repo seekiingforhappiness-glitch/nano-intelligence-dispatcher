@@ -154,14 +154,14 @@ async function packOrdersIntoTrips(
   depotCoord: { lng: number; lat: number },
   options: ScheduleOptions
 ): Promise<TempTrip[]> {
-  const resultTrips: TempTrip[] = [];
-  const tuning = options.tuning;
-  const effectiveMaxStops = maxStops + (tuning?.stopCountBias || 0);
-
   // 获取该组可用的最大车型
   const availableVehicles = requiredVehicleType
     ? vehicles.filter(v => v.enabled && (v.category === requiredVehicleType || v.name === requiredVehicleType))
     : vehicles.filter(v => v.enabled);
+
+  const resultTrips: TempTrip[] = [];
+  const tuning = options.tuning;
+  const effectiveMaxStops = maxStops + (tuning?.stopCountBias || 0);
 
   if (availableVehicles.length === 0) {
     return orders.map(o => ({
@@ -173,12 +173,30 @@ async function packOrdersIntoTrips(
     }));
   }
 
-  // 🎯 优化装箱策略：优先使用能达到 90-105% 装载率的大车
-  // 排序：按载重从大到小，优先尝试大车装箱
+  // 🎯 核心修复：在该层级再次确认订单是否超过物理上限
+  const maxVehicleForGroup = [...availableVehicles].sort((a, b) => b.maxWeightKg - a.maxWeightKg)[0];
+  const groupTolerance = 1 + (tuning?.overloadTolerance || 0);
+
+  const finalPool: Order[] = [];
+  for (const o of orders) {
+    if (o.weightKg > maxVehicleForGroup.maxWeightKg * groupTolerance) {
+      console.log(`🚨 [实时拆单] 订单 ${o.orderId} (${o.weightKg}kg) 超过当前组车型上限 ${maxVehicleForGroup.maxWeightKg}kg，执行二次拆分`);
+      const parts = splitOversizedOrder(o, {
+        weight: maxVehicleForGroup.maxWeightKg,
+        pallets: maxVehicleForGroup.palletSlots,
+        volume: maxVehicleForGroup.maxVolumeM3 || 999
+      });
+      finalPool.push(...parts);
+    } else {
+      finalPool.push(o);
+    }
+  }
+
+  // 🎯 优化装箱策略：优先使用大车
   const sortedVehicles = [...availableVehicles].sort((a, b) => b.maxWeightKg - a.maxWeightKg);
 
   // 排序：优先处理时间紧和重量大的订单
-  const orderPool = [...orders].sort((a, b) => {
+  const orderPool = [...finalPool].sort((a, b) => {
     // 1. 时间窗更紧的优先
     const aEnd = a.constraints.timeWindow?.end || '23:59';
     const bEnd = b.constraints.timeWindow?.end || '23:59';
@@ -291,6 +309,7 @@ async function packOrdersIntoTrips(
       for (const pool of pools) {
         if (pool.length > 0) {
           const o = pool.shift()!;
+          console.warn(`⚠️ [装箱失败] 订单 ${o.orderId} (${o.weightKg}kg) 无法塞入任何车次（不仅是载重，可能是时间冲突或排单约束），被迫单装。`);
           resultTrips.push({
             orders: [o],
             totalWeightKg: o.weightKg,
@@ -370,8 +389,10 @@ async function checkTimeWindowFeasibility(
       const [endH, endM] = order.constraints.timeWindow.end.split(':').map(Number);
       const deadline = endH * 60 + (endM || 0);
 
-      // 这里的硬性跳出增加一个 timeBuffer 容忍度
-      if (currentTime > deadline + (tuning?.timeBuffer || 0)) {
+      // 这里的硬性跳出增加一个基础 20 分钟的 Elastic Buffer
+      // 架构决策：宁可建议架构师提前出发，也要避免由于 1 分钟的误差产生一辆 350 元的小车
+      const elasticBuffer = 20 + (tuning?.timeBuffer || 0);
+      if (currentTime > deadline + elasticBuffer) {
         return false;
       }
     }
