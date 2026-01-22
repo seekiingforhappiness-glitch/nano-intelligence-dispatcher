@@ -158,22 +158,24 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
 
             const tuning = currentOptions.tuning || { overloadTolerance: 0.1, stopCountBias: 0, clusterBias: 0, timeBuffer: 0 };
 
-            // 🚨 核心修复：如果是严重超载 (type === 'overload')，强制降低容忍度
-            // 这会使 binPacking 更严格地拆分订单
+            // 1. 🚨 核心自愈：超载 (overload)
             if (auditResult.issues.some(i => i.type === 'overload')) {
                 tuning.overloadTolerance = Math.max(0, tuning.overloadTolerance - 0.05);
-                tuning.stopCountBias -= 1;
-                console.log(`🔧 自愈: 检测到超载，降低容忍度到 ${tuning.overloadTolerance}，串点偏移到 ${tuning.stopCountBias}`);
+                tuning.stopCountBias = Math.max(-2, tuning.stopCountBias - 1);
             }
 
-            // 如果是时效冲突，增加时间缓冲
+            // 2. ⏳ 弹性自愈：时效冲突 (time_conflict)
             if (auditResult.issues.some(i => i.type === 'time_conflict')) {
-                tuning.timeBuffer += 15;
+                // 每次重试增加 15 分钟 Buffer，最多 45 分钟（符合架构师弹性窗口建议）
+                tuning.timeBuffer = Math.min(45, (tuning.timeBuffer || 0) + 15);
             }
 
-            // 如果是低效，尝试增加点数或放宽合并
+            // 3. 📉 效能自愈：低效 (inefficient) —— 解决"孤儿订单"
             if (auditResult.issues.some(i => i.type === 'inefficient')) {
+                // 增加串点上限，并大幅提升聚类紧密度权重 (clusterBias)
                 tuning.stopCountBias += 1;
+                tuning.clusterBias = (tuning.clusterBias || 0) + 0.2;
+                console.log(`🔧 自愈: 提高聚类紧密度至 ${tuning.clusterBias}，尝试合并孤儿订单`);
             }
 
             currentOptions = { ...currentOptions, tuning };

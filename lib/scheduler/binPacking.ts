@@ -2,7 +2,7 @@ import { Order } from '@/types/order';
 import { VehicleConfig } from '@/types/vehicle';
 import { ScheduleOptions } from '@/types/schedule';
 import { optimizeRoute, calculateSegmentDistances } from './routing';
-import { estimateRoadDistance, estimateDuration } from '@/lib/utils/haversine';
+import { estimateRoadDistance, estimateDuration, haversineDistance } from '@/lib/utils/haversine';
 
 /**
  * 临时车次结构（装箱阶段）
@@ -194,24 +194,56 @@ async function packOrdersIntoTrips(
       }
     }
 
-    // 2. 尝试塞入 normal (First-Fit 策略)
-    let i = 0;
-    while (i < normalArr.length) {
-      const order = normalArr[i];
-      const maxNormalStops = mustBeLast.length > 0 ? effectiveMaxStops - 1 : effectiveMaxStops;
+    // 2. 尝试塞入 normal (结合空间邻近度 - 架构优化)
+    while (currentTrip.orders.length < effectiveMaxStops) {
+      // 🎯 架构补全：寻找距离当前车次最后一个点"最近"且满足约束的订单
+      // 而非仅仅按 Pool 顺序扫描，这能极大缩短大车绕路距离
+      const lastPoint = currentTrip.orders.length > 0
+        ? (currentTrip.orders[currentTrip.orders.length - 1].coordinates || depotCoord)
+        : depotCoord;
 
-      if (await canAddOrder(currentTrip, order, maxVehicle, maxNormalStops, depotCoord, options)) {
+      let bestIndex = -1;
+      let minDistance = Infinity;
+
+      for (let j = 0; j < normalArr.length; j++) {
+        const order = normalArr[j];
+        if (!order.coordinates) continue;
+
+        // 计算距离（使用海氏距离估算）
+        const dist = haversineDistance(
+          lastPoint.lat, lastPoint.lng,
+          order.coordinates.lat, order.coordinates.lng
+        );
+
+        // 如果距离更近，则尝试添加
+        if (dist < minDistance) {
+          const maxNormalStops = mustBeLast.length > 0 ? effectiveMaxStops - 1 : effectiveMaxStops;
+          if (await canAddOrder(currentTrip, order, maxVehicle, maxNormalStops, depotCoord, options)) {
+            bestIndex = j;
+            minDistance = dist;
+            // 如果距离非常近（< 5km），直接锁定，不再继续搜寻提升效率
+            if (dist < 5) break;
+          }
+        }
+
+        // 性能防护：如果 normalPool 太大，只搜索前 50 个潜在候选者
+        if (j > 50 && bestIndex !== -1) break;
+      }
+
+      if (bestIndex !== -1) {
+        const order = normalArr[bestIndex];
         currentTrip.orders.push(order);
         currentTrip.totalWeightKg += order.weightKg;
         currentTrip.totalVolumeM3 += order.volumeM3 || 0;
         currentTrip.totalPalletSlots += order.effectivePalletSlots;
-        normalArr.splice(i, 1);
+        normalArr.splice(bestIndex, 1);
       } else {
-        i++;
+        // 找了一圈没找到合适的，跳出
+        break;
       }
 
       const tolerance = 1 + (tuning?.overloadTolerance || 0);
-      if (currentTrip.orders.length >= maxNormalStops || currentTrip.totalWeightKg >= maxVehicle.maxWeightKg * tolerance) {
+      if (currentTrip.totalWeightKg >= maxVehicle.maxWeightKg * tolerance) {
         break;
       }
     }

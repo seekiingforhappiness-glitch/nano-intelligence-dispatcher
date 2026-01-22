@@ -131,22 +131,29 @@ async function auditTimeWindows(
                 const delay = currentTime - deadline;
                 const isCritical = delay > 30; // Define isCritical based on delay threshold
 
-                if (isCritical) {
+                if (delay > 30) {
+                    // 🚨 架构建议：严重超时（30分钟以上）列为 Critical，必须处理
                     issues.push({
                         tripId: trip.tripId,
                         type: 'time_conflict',
                         severity: 'critical',
-                        message: `${stop.order.customerName} 严重迟到 (${Math.round(delay)}分)，不可接受。`,
+                        message: `${stop.order.customerName} 严重迟到 (${Math.round(delay)}分)，方案不可行。`,
                     });
-                    hasCritical = true; // Mark as critical for the trip
-                } else if (delay > 0) {
+                    hasCritical = true;
+                } else if (delay > 5) {
+                    // ⚠️ 架构建议：轻微超时视为"可协调"（Elastic Window）
+                    // 给予警告但不阻断生成，由自愈引擎建议调整仓库作业时间
                     issues.push({
                         tripId: trip.tripId,
                         type: 'time_conflict',
                         severity: 'warning',
-                        message: `${stop.order.customerName} 轻微迟到 (${Math.round(delay)}分)，建议优化。`,
+                        message: `${stop.order.customerName} 轻微迟到 (${Math.round(delay)}分)，建议提早仓库装货。`,
                     });
-                    suggestions.push(`建议调早仓库配货时间约 ${Math.round(delay)} 分钟，或协调 ${order.orderId} 客户顺延接收。`);
+
+                    const earliestDeparture = options.startTime;
+                    suggestions.push(
+                        `📌 调度师决策参考：此方案（${trip.tripId}）预估成本约 ¥${Math.round(trip.estimatedCost || 0)}。虽然 ${stop.order.customerName} 滞后 ${Math.round(delay)}分，但可通过提早 ${Math.round(delay + 5)}分钟装车规避。`
+                    );
                 }
             }
         }
