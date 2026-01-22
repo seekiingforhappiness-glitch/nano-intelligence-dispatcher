@@ -43,11 +43,34 @@ export async function packTrips(
 
     // 精确寻找该组车型要求的载重上限
     // 注意：无论是否有 vehicleType 约束，都必须基于实际可用的最大车型来拆分超大订单
+    // 🎯 增强车型匹配鲁棒性
     let groupMaxCap = globalMaxCap;
     if (vType) {
-      // 尝试匹配 category 或 name (用户可能在 Excel 里写的是 3.8米 而不是 厢式)
-      const typeVehicles = vehicles.filter(v => v.enabled && (v.category === vType || v.name === vType));
-      if (typeVehicles.length > 0) {
+      const normalizedType = vType.trim().toLowerCase();
+      // 1. 精确匹配（忽略大小写和空格）
+      let typeVehicles = vehicles.filter(v =>
+        v.enabled && (
+          v.category === vType ||
+          v.name === vType ||
+          v.name.toLowerCase().replace(/\s/g, '') === normalizedType.replace(/\s/g, '')
+        )
+      );
+
+      // 2. 如果没匹配到，尝试模糊匹配（如 "3.8米" 匹配 "3.8米厢式"）
+      if (typeVehicles.length === 0) {
+        typeVehicles = vehicles.filter(v =>
+          v.enabled && v.name.toLowerCase().includes(normalizedType.replace('米', '').replace('m', ''))
+        );
+      }
+
+      // 3. 如果还是没有，且 vType 里有数字（如 "3.8"），尝试硬编码兜底
+      if (typeVehicles.length === 0) {
+        if (normalizedType.includes('3.8') || normalizedType.includes('3m8')) {
+          groupMaxCap = { weight: 3000, pallets: 6, volume: 14 }; // 3.8米兜底
+        } else if (normalizedType.includes('4.2') || normalizedType.includes('4m2')) {
+          groupMaxCap = { weight: 4500, pallets: 8, volume: 18 }; // 4.2米兜底
+        }
+      } else {
         groupMaxCap = typeVehicles.reduce((acc, v) => ({
           weight: Math.max(acc.weight, v.maxWeightKg),
           pallets: Math.max(acc.pallets, v.palletSlots),

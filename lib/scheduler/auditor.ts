@@ -66,15 +66,16 @@ export async function auditSchedule(
             totalScore -= 5;
         }
 
-        // 2. 低效检查 (长途轻载)
-        if (trip.totalDistance > 50 && loadRate < 0.3) {
+        // 2. 低效检查 (长途轻载 或 被选车逻辑标记为低效)
+        if ((trip.totalDistance > 50 && loadRate < 0.4) || (trip.reason || '').includes('效率低下')) {
             issues.push({
                 tripId: trip.tripId,
                 type: 'inefficient',
-                severity: 'critical',
-                message: `长途轻载警告：单次行程 >50km 但装载率低于 30%。`,
+                severity: 'critical', // 架构修正：低效必须作为 Critical 处理以触发自愈重组
+                message: `低效运输警告：${trip.reason || `单次行程 >50km 但装载率过低(${Math.round(loadRate * 100)}%)`}`,
             });
             totalScore -= 15;
+            suggestions.push(`车次 ${trip.tripId} 效率低下，建议放宽时间窗或增加改车次配载量。`);
         }
 
         // 3. 时效稽核 (时间窗硬约束)

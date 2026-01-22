@@ -123,9 +123,20 @@ export function selectVehicle(
   const best = results[0];
   const loadPct = Math.round(best.loadRateWeight * 100);
 
+  // 🎯 架构优化：主动识别低效方案
+  // 如果装载率 < 40% 且使用的不是最小车型（3.8/4.2），标记为低效
+  // 3.8米/4.2米已经是最小的了，如果还装不满那是订单本身小，不算低效（或者应走 LTL）
+  // 但如果是 9.6米 只装了 30%，那是绝对的浪费，必须重组
+  const isSmallTruck = best.vehicle.maxWeightKg <= 4500;
+  let reason = `${best.vehicle.name} 综合最优 (装载率${loadPct}%, 单位成本¥${best.unitCost.toFixed(2)}/吨公里)`;
+
+  if (!isSmallTruck && best.loadRateWeight < 0.4) {
+    reason = `⚠️ [效率低下] ${reason} - 建议拆分重组`;
+  }
+
   return {
     ...best,
-    reason: `${best.vehicle.name} 综合最优 (装载率${loadPct}%, 单位成本¥${best.unitCost.toFixed(2)}/吨公里)`,
+    reason,
   };
 }
 
