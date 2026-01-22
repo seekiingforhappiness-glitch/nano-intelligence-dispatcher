@@ -178,20 +178,14 @@ async function packOrdersIntoTrips(
       requiredVehicleType,
     };
 
-    // 🎯 每次新车次动态选择目标车型：优先使用能装下当前待装订单、装载率能达90-105%的最大车型
-    // 这样既避免小车分散，又不会导致低装载率
-    const estimatedWeight = (mustBeFirst[0]?.weightKg || 0) +
-      normalArr.slice(0, effectiveMaxStops).reduce((sum, o) => sum + o.weightKg, 0);
-
-    // 找出能装下预估重量且装载率能达90%以上的最大车型
-    const targetVehicle = sortedVehicles.find(v =>
-      estimatedWeight >= v.maxWeightKg * 0.9 && estimatedWeight <= v.maxWeightKg * 1.1
-    ) || sortedVehicles[0]; // 兜底：使用最大车型
+    // 🎯 简化策略：使用最大可用车型作为装箱上限
+    // 车型选择阶段的综合评分会自然选择合适的车型
+    const maxVehicle = sortedVehicles[0];
 
     // 1. 先尝试塞入 mustBeFirst
     if (mustBeFirst.length > 0) {
       const order = mustBeFirst[0];
-      if (await canAddOrder(currentTrip, order, targetVehicle, effectiveMaxStops, depotCoord, options)) {
+      if (await canAddOrder(currentTrip, order, maxVehicle, effectiveMaxStops, depotCoord, options)) {
         currentTrip.orders.push(order);
         currentTrip.totalWeightKg += order.weightKg;
         currentTrip.totalVolumeM3 += order.volumeM3 || 0;
@@ -206,7 +200,7 @@ async function packOrdersIntoTrips(
       const order = normalArr[i];
       const maxNormalStops = mustBeLast.length > 0 ? effectiveMaxStops - 1 : effectiveMaxStops;
 
-      if (await canAddOrder(currentTrip, order, targetVehicle, maxNormalStops, depotCoord, options)) {
+      if (await canAddOrder(currentTrip, order, maxVehicle, maxNormalStops, depotCoord, options)) {
         currentTrip.orders.push(order);
         currentTrip.totalWeightKg += order.weightKg;
         currentTrip.totalVolumeM3 += order.volumeM3 || 0;
@@ -217,7 +211,7 @@ async function packOrdersIntoTrips(
       }
 
       const tolerance = 1 + (tuning?.overloadTolerance || 0);
-      if (currentTrip.orders.length >= maxNormalStops || currentTrip.totalWeightKg >= targetVehicle.maxWeightKg * tolerance) {
+      if (currentTrip.orders.length >= maxNormalStops || currentTrip.totalWeightKg >= maxVehicle.maxWeightKg * tolerance) {
         break;
       }
     }
@@ -225,7 +219,7 @@ async function packOrdersIntoTrips(
     // 3. 最后锁定一个 mustBeLast
     if (mustBeLast.length > 0 && currentTrip.orders.length < effectiveMaxStops) {
       for (let j = 0; j < mustBeLast.length; j++) {
-        if (await canAddOrder(currentTrip, mustBeLast[j], targetVehicle, effectiveMaxStops, depotCoord, options)) {
+        if (await canAddOrder(currentTrip, mustBeLast[j], maxVehicle, effectiveMaxStops, depotCoord, options)) {
           const order = mustBeLast[j];
           currentTrip.orders.push(order);
           currentTrip.totalWeightKg += order.weightKg;

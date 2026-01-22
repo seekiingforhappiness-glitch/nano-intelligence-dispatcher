@@ -136,7 +136,7 @@ async function auditTimeWindows(
                         tripId: trip.tripId,
                         type: 'time_conflict',
                         severity: 'critical',
-                        message: `${stop.order.customerName} 严重迟到 (${delay}分)，不可接受。`,
+                        message: `${stop.order.customerName} 严重迟到 (${Math.round(delay)}分)，不可接受。`,
                     });
                     hasCritical = true; // Mark as critical for the trip
                 } else if (delay > 0) {
@@ -144,9 +144,9 @@ async function auditTimeWindows(
                         tripId: trip.tripId,
                         type: 'time_conflict',
                         severity: 'warning',
-                        message: `${stop.order.customerName} 轻微迟到 (${delay}分)，建议优化。`,
+                        message: `${stop.order.customerName} 轻微迟到 (${Math.round(delay)}分)，建议优化。`,
                     });
-                    suggestions.push(`建议调早仓库配货时间约 ${delay} 分钟，或协调 ${order.orderNumber} 客户顺延接收。`);
+                    suggestions.push(`建议调早仓库配货时间约 ${Math.round(delay)} 分钟，或协调 ${order.orderId} 客户顺延接收。`);
                 }
             }
         }
