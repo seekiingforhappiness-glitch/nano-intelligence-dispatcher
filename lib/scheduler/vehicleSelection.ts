@@ -15,6 +15,13 @@ export interface VehicleSelectionResult {
 
 /**
  * 为车次选择最优车型
+ * 
+ * 🎯 优化目标（按优先级）：
+ * 1. 装载率在 90%-110% 区间内（最佳效率区间）
+ * 2. 单位成本（元/吨公里）最低
+ * 3. 优先使用大车（载重大的车型加分）
+ * 
+ * 业务逻辑：总成本最优 = 尽可能使用大车装满，而非多辆小车
  */
 export function selectVehicle(
   trip: TempTrip,
@@ -28,17 +35,17 @@ export function selectVehicle(
   // 如果有车型约束，进一步过滤
   if (trip.requiredVehicleType) {
     availableVehicles = availableVehicles.filter(
-      v => v.category === trip.requiredVehicleType
+      v => v.category === trip.requiredVehicleType || v.name === trip.requiredVehicleType
     );
   }
 
-  // 过滤满足容量要求的车型
+  // 过滤满足容量要求的车型（至少能装下）
   const suitableVehicles = availableVehicles.filter(
     v => v.maxWeightKg >= trip.totalWeightKg && v.palletSlots >= trip.totalPalletSlots
   );
 
   if (suitableVehicles.length === 0) {
-    // 没有合适的车型，选择最大的
+    // 兜底：没有合适的车型，选择最大的
     const maxVehicle = availableVehicles.reduce(
       (max, v) => (v.maxWeightKg > max.maxWeightKg ? v : max),
       availableVehicles[0] || vehicles[0]
@@ -47,7 +54,6 @@ export function selectVehicle(
     const loadRate = trip.totalWeightKg / maxVehicle.maxWeightKg;
     const cost = calculateCost(maxVehicle, distance, trip.orders.length, costMode);
 
-    // 🚨 严重超载警告：理论上 binPacking 应该已经拆分过，如果还到这里说明有漏洞
     if (loadRate > 1.1) {
       console.warn(`⚠️ 车辆选择异常：订单总重 ${trip.totalWeightKg}kg 超过最大车型 ${maxVehicle.name} (${maxVehicle.maxWeightKg}kg) 的 110%，装载率: ${Math.round(loadRate * 100)}%`);
     }
@@ -64,25 +70,62 @@ export function selectVehicle(
     };
   }
 
-  // 计算每个车型的成本，选择成本最低的
+  // 🎯 核心优化：综合评分选车
   const results = suitableVehicles.map(vehicle => {
     const cost = calculateCost(vehicle, distance, trip.orders.length, costMode);
+    const loadRateWeight = trip.totalWeightKg / vehicle.maxWeightKg;
+    const loadRatePallet = trip.totalPalletSlots / vehicle.palletSlots;
+
+    // 1. 单位成本（元/吨公里）：越低越好
+    const unitCost = trip.totalWeightKg > 0
+      ? cost.total / (trip.totalWeightKg / 1000) / Math.max(distance, 1)
+      : cost.total / Math.max(distance, 1);
+
+    // 2. 装载率得分：90-110% 为最佳区间，得100分；偏离则扣分
+    let loadRateScore = 100;
+    if (loadRateWeight < 0.9) {
+      // 低于90%，每低10%扣20分（鼓励装满）
+      loadRateScore = Math.max(0, 100 - (0.9 - loadRateWeight) * 200);
+    } else if (loadRateWeight > 1.1) {
+      // 超过110%，每超10%扣30分（严格限制超载）
+      loadRateScore = Math.max(0, 100 - (loadRateWeight - 1.1) * 300);
+    }
+
+    // 3. 大车偏好得分：载重越大加分越多（符合业务习惯）
+    const sizePreferenceScore = Math.min(100, (vehicle.maxWeightKg / 40000) * 100);
+
+    // 综合得分 = 装载率(50%) + 单位成本(30%) + 大车偏好(20%)
+    // 注意：单位成本需要归一化并取反（成本越低得分越高）
+    const maxUnitCost = Math.max(...suitableVehicles.map(v => {
+      const c = calculateCost(v, distance, trip.orders.length, costMode);
+      return trip.totalWeightKg > 0
+        ? c.total / (trip.totalWeightKg / 1000) / Math.max(distance, 1)
+        : c.total / Math.max(distance, 1);
+    }));
+    const unitCostScore = maxUnitCost > 0 ? (1 - unitCost / maxUnitCost) * 100 : 100;
+
+    const totalScore = loadRateScore * 0.5 + unitCostScore * 0.3 + sizePreferenceScore * 0.2;
+
     return {
       vehicle,
       cost: cost.total,
       costBreakdown: cost,
-      loadRateWeight: trip.totalWeightKg / vehicle.maxWeightKg,
-      loadRatePallet: trip.totalPalletSlots / vehicle.palletSlots,
+      loadRateWeight,
+      loadRatePallet,
+      unitCost,
+      totalScore,
     };
   });
 
-  // 按成本排序
-  results.sort((a, b) => a.cost - b.cost);
+  // 按综合得分排序（高分优先）
+  results.sort((a, b) => b.totalScore - a.totalScore);
 
   const best = results[0];
+  const loadPct = Math.round(best.loadRateWeight * 100);
+
   return {
     ...best,
-    reason: `${best.vehicle.name} 成本最优`,
+    reason: `${best.vehicle.name} 综合最优 (装载率${loadPct}%, 单位成本¥${best.unitCost.toFixed(2)}/吨公里)`,
   };
 }
 
