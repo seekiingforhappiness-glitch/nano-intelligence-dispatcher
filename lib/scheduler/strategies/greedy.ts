@@ -158,11 +158,19 @@ export class GreedyNearestNeighborStrategy implements SolverStrategy {
 
             const tuning = currentOptions.tuning || { overloadTolerance: 0.1, stopCountBias: 0, clusterBias: 0, timeBuffer: 0 };
 
-            // 如果是严重超载或时效冲突，减小串点数限制或增加缓冲
-            if (auditResult.issues.some(i => i.type === 'overload' || i.type === 'time_conflict')) {
+            // 🚨 核心修复：如果是严重超载 (type === 'overload')，强制降低容忍度
+            // 这会使 binPacking 更严格地拆分订单
+            if (auditResult.issues.some(i => i.type === 'overload')) {
+                tuning.overloadTolerance = Math.max(0, tuning.overloadTolerance - 0.05);
                 tuning.stopCountBias -= 1;
+                console.log(`🔧 自愈: 检测到超载，降低容忍度到 ${tuning.overloadTolerance}，串点偏移到 ${tuning.stopCountBias}`);
+            }
+
+            // 如果是时效冲突，增加时间缓冲
+            if (auditResult.issues.some(i => i.type === 'time_conflict')) {
                 tuning.timeBuffer += 15;
             }
+
             // 如果是低效，尝试增加点数或放宽合并
             if (auditResult.issues.some(i => i.type === 'inefficient')) {
                 tuning.stopCountBias += 1;

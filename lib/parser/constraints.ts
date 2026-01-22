@@ -13,7 +13,7 @@ interface ConstraintRule {
 // ============ 全部规则定义 ============
 
 const CONSTRAINT_RULES: ConstraintRule[] = [
-  
+
   // ===== 时间窗规则 =====
   {
     id: 'time_6digit',
@@ -21,8 +21,8 @@ const CONSTRAINT_RULES: ConstraintRule[] = [
     patterns: [/(\d{6})\s*[-~至到]\s*(\d{6})/],
     apply: (result, match) => {
       result.timeWindow = {
-        start: `${match[1].slice(0,2)}:${match[1].slice(2,4)}`,
-        end: `${match[2].slice(0,2)}:${match[2].slice(2,4)}`,
+        start: `${match[1].slice(0, 2)}:${match[1].slice(2, 4)}`,
+        end: `${match[2].slice(0, 2)}:${match[2].slice(2, 4)}`,
       };
     },
   },
@@ -32,8 +32,8 @@ const CONSTRAINT_RULES: ConstraintRule[] = [
     patterns: [/(\d{1,2}):(\d{2})\s*[-~至到]\s*(\d{1,2}):(\d{2})/],
     apply: (result, match) => {
       result.timeWindow = {
-        start: `${match[1].padStart(2,'0')}:${match[2]}`,
-        end: `${match[3].padStart(2,'0')}:${match[4]}`,
+        start: `${match[1].padStart(2, '0')}:${match[2]}`,
+        end: `${match[3].padStart(2, '0')}:${match[4]}`,
       };
     },
   },
@@ -118,6 +118,31 @@ const CONSTRAINT_RULES: ConstraintRule[] = [
     patterns: [/冷藏车|冷藏|冷链|保温/],
     apply: (result) => {
       result.requiredVehicleType = '冷藏';
+    },
+  },
+  // ===== 限定具体车型规格 =====
+  {
+    id: 'vehicle_3.8m',
+    category: 'vehicle',
+    patterns: [/限3\.?8米|只能3\.?8|必须3\.?8|限用3\.?8/],
+    apply: (result) => {
+      result.requiredVehicleType = '3.8米';
+    },
+  },
+  {
+    id: 'vehicle_4.2m',
+    category: 'vehicle',
+    patterns: [/限4\.?2米|只能4\.?2|必须4\.?2|限用4\.?2/],
+    apply: (result) => {
+      result.requiredVehicleType = '4.2米';
+    },
+  },
+  {
+    id: 'vehicle_6.8m',
+    category: 'vehicle',
+    patterns: [/限6\.?8米|只能6\.?8|必须6\.?8|限用6\.?8/],
+    apply: (result) => {
+      result.requiredVehicleType = '6.8米';
     },
   },
 

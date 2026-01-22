@@ -42,6 +42,7 @@ export async function packTrips(
     const vType = vehicleType === 'null' ? null : vehicleType;
 
     // 精确寻找该组车型要求的载重上限
+    // 注意：无论是否有 vehicleType 约束，都必须基于实际可用的最大车型来拆分超大订单
     let groupMaxCap = globalMaxCap;
     if (vType) {
       // 尝试匹配 category 或 name (用户可能在 Excel 里写的是 3.8米 而不是 厢式)
@@ -55,7 +56,8 @@ export async function packTrips(
       }
     }
 
-    // 第一步：拆分超大订单（确保之后每单都能塞进对应的最大车模型）
+    // 🚨 核心修复：始终检测并拆分超大订单，不依赖 vehicleType 是否指定
+    // 使用当前组的最大车型上限，确保任何超重订单都会被物理拆分
     const processedTypeOrders: Order[] = [];
     for (const order of typeOrders) {
       if (order.weightKg > groupMaxCap.weight ||
@@ -63,6 +65,7 @@ export async function packTrips(
         (order.volumeM3 && order.volumeM3 > groupMaxCap.volume)) {
         const parts = splitOversizedOrder(order, groupMaxCap);
         processedTypeOrders.push(...parts);
+        console.log(`📦 自动拆单: ${order.orderId} (${order.weightKg}kg) -> ${parts.length} 个子订单`);
       } else {
         processedTypeOrders.push(order);
       }

@@ -44,14 +44,23 @@ export function selectVehicle(
       availableVehicles[0] || vehicles[0]
     );
 
+    const loadRate = trip.totalWeightKg / maxVehicle.maxWeightKg;
     const cost = calculateCost(maxVehicle, distance, trip.orders.length, costMode);
+
+    // 🚨 严重超载警告：理论上 binPacking 应该已经拆分过，如果还到这里说明有漏洞
+    if (loadRate > 1.1) {
+      console.warn(`⚠️ 车辆选择异常：订单总重 ${trip.totalWeightKg}kg 超过最大车型 ${maxVehicle.name} (${maxVehicle.maxWeightKg}kg) 的 110%，装载率: ${Math.round(loadRate * 100)}%`);
+    }
+
     return {
       vehicle: maxVehicle,
       cost: cost.total,
       costBreakdown: cost,
-      loadRateWeight: trip.totalWeightKg / maxVehicle.maxWeightKg,
+      loadRateWeight: loadRate,
       loadRatePallet: trip.totalPalletSlots / maxVehicle.palletSlots,
-      reason: '容量不足，使用最大可用车型',
+      reason: loadRate > 1.1
+        ? `⚠️ 严重超载 (${Math.round(loadRate * 100)}%)，建议拆单或更换车型`
+        : '容量紧张，使用最大可用车型',
     };
   }
 

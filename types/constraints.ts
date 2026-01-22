@@ -11,7 +11,8 @@ export interface RouteConstraints {
   excludeSaturday: boolean;  // 周六不收
 
   // ===== 2. 车型约束 =====
-  requiredVehicleType: '飞翼' | '厢式' | '平板' | '高栏' | '冷藏' | null;  // null = 不限
+  // 支持车辆类别（飞翼、厢式等）或具体规格（3.8米、4.2米等）
+  requiredVehicleType: '飞翼' | '厢式' | '平板' | '高栏' | '冷藏' | '3.8米' | '4.2米' | '6.8米' | '9.6米' | '12.5米' | '13.5米' | '17.5米' | null;  // null = 不限
 
   // ===== 3. 装载约束 =====
   noStack: boolean;  // 不可堆叠 → 托盘位占用×2
@@ -20,7 +21,7 @@ export interface RouteConstraints {
   mustBeLast: boolean;       // 必须最后送（如：不允许带货进厂）
   mustBeFirst: boolean;      // 必须最先送
   singleTripOnly: boolean;   // 只能单独一趟（不可与其他订单合并）
-  
+
   // ===== 元数据 =====
   rawText: string;           // 原始文本（用于人工复核）
   parsedRules: string[];     // 命中的规则ID列表

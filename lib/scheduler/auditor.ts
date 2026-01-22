@@ -108,7 +108,7 @@ async function auditTimeWindows(
 
     const tripOrders = trip.stops.map(s => s.order);
     const optimized = optimizeRoute(tripOrders, depotCoord);
-    const segmentDistances = await calculateSegmentDistances(optimized, depotCoord);
+    const segmentDistances = calculateSegmentDistances(optimized, depotCoord);
 
     const [startH, startM] = options.startTime.split(':').map(Number);
     let currentTime = startH * 60 + (startM || 0);
