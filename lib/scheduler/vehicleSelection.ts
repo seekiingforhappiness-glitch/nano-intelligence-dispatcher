@@ -70,7 +70,13 @@ export function selectVehicle(
     };
   }
 
-  // 🎯 核心优化：综合评分选车
+  // 🎯 核心优化：综合评分选车（使用改进的评分函数）
+
+  // 预计算：获取可用车型中的最大和最小载重（用于相对评分）
+  const maxAvailableWeight = Math.max(...suitableVehicles.map(v => v.maxWeightKg));
+  const minAvailableWeight = Math.min(...suitableVehicles.map(v => v.maxWeightKg));
+  const weightRange = maxAvailableWeight - minAvailableWeight;
+
   const results = suitableVehicles.map(vehicle => {
     const cost = calculateCost(vehicle, distance, trip.orders.length, costMode);
     const loadRateWeight = trip.totalWeightKg / vehicle.maxWeightKg;
@@ -81,21 +87,45 @@ export function selectVehicle(
       ? cost.total / (trip.totalWeightKg / 1000) / Math.max(distance, 1)
       : cost.total / Math.max(distance, 1);
 
-    // 2. 装载率得分：90-110% 为最佳区间，得100分；偏离则扣分
-    let loadRateScore = 100;
-    if (loadRateWeight < 0.9) {
-      // 低于90%，每低10%扣20分（鼓励装满）
-      loadRateScore = Math.max(0, 100 - (0.9 - loadRateWeight) * 200);
+    // 2. 装载率得分（改进版：使用平滑曲线避免悬崖效应）
+    // 最佳区间 70%-100%，超载惩罚，低载温和惩罚
+    let loadRateScore: number;
+    if (loadRateWeight >= 0.7 && loadRateWeight <= 1.0) {
+      // 最佳区间：70-100% 得满分
+      loadRateScore = 100;
+    } else if (loadRateWeight > 1.0 && loadRateWeight <= 1.1) {
+      // 轻微超载：100-110% 温和扣分（每1%扣2分）
+      loadRateScore = 100 - (loadRateWeight - 1.0) * 200;
     } else if (loadRateWeight > 1.1) {
-      // 超过110%，每超10%扣30分（严格限制超载）
-      loadRateScore = Math.max(0, 100 - (loadRateWeight - 1.1) * 300);
+      // 严重超载：>110% 大幅扣分（每1%扣5分）
+      loadRateScore = Math.max(0, 80 - (loadRateWeight - 1.1) * 500);
+    } else if (loadRateWeight >= 0.4 && loadRateWeight < 0.7) {
+      // 低载：40-70% 温和扣分（使用平方根曲线平滑过渡）
+      const deficit = 0.7 - loadRateWeight;
+      loadRateScore = 100 - Math.sqrt(deficit) * 100;
+    } else {
+      // 极低载：<40% 大幅扣分（鼓励换小车）
+      loadRateScore = Math.max(0, 50 - (0.4 - loadRateWeight) * 200);
     }
 
-    // 3. 大车偏好得分：载重越大加分越多（符合业务习惯）
-    const sizePreferenceScore = Math.min(100, (vehicle.maxWeightKg / 40000) * 100);
+    // 3. 大车偏好得分（改进版：使用对数曲线 + 相对评分）
+    // 避免硬编码 40000kg，改为相对于可用车型的最大值
+    let sizePreferenceScore: number;
+    if (weightRange > 0) {
+      // 相对评分：在可用车型范围内，越大越好
+      const relativePosition = (vehicle.maxWeightKg - minAvailableWeight) / weightRange;
+      sizePreferenceScore = 50 + relativePosition * 50; // 50-100 分
+    } else {
+      // 只有一种车型可选
+      sizePreferenceScore = 75;
+    }
 
-    // 综合得分 = 装载率(50%) + 单位成本(30%) + 大车偏好(20%)
-    // 注意：单位成本需要归一化并取反（成本越低得分越高）
+    // 额外：使用对数曲线平滑大车和小车的差距
+    // log10(3000) ≈ 3.5, log10(40000) ≈ 4.6，范围约 1.1
+    const logScore = (Math.log10(vehicle.maxWeightKg) - 3.0) / 2.0 * 100;
+    sizePreferenceScore = (sizePreferenceScore + Math.min(100, Math.max(0, logScore))) / 2;
+
+    // 4. 单位成本得分（归一化）
     const maxUnitCost = Math.max(...suitableVehicles.map(v => {
       const c = calculateCost(v, distance, trip.orders.length, costMode);
       return trip.totalWeightKg > 0
@@ -104,7 +134,9 @@ export function selectVehicle(
     }));
     const unitCostScore = maxUnitCost > 0 ? (1 - unitCost / maxUnitCost) * 100 : 100;
 
-    const totalScore = loadRateScore * 0.5 + unitCostScore * 0.3 + sizePreferenceScore * 0.2;
+    // 综合得分 = 装载率(45%) + 单位成本(35%) + 大车偏好(20%)
+    // 稍微提高单位成本权重，因为成本是最终优化目标
+    const totalScore = loadRateScore * 0.45 + unitCostScore * 0.35 + sizePreferenceScore * 0.20;
 
     return {
       vehicle,
@@ -114,6 +146,12 @@ export function selectVehicle(
       loadRatePallet,
       unitCost,
       totalScore,
+      // 调试信息
+      _debug: {
+        loadRateScore: Math.round(loadRateScore),
+        unitCostScore: Math.round(unitCostScore),
+        sizePreferenceScore: Math.round(sizePreferenceScore),
+      },
     };
   });
 

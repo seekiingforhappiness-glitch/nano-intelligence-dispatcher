@@ -1,4 +1,4 @@
-import { Trip, ScheduleOptions } from '@/types/schedule';
+import { Trip, ScheduleOptions, TIME_WINDOW_CONSTANTS } from '@/types/schedule';
 import { Order } from '@/types/order';
 import { VehicleConfig } from '@/types/vehicle';
 import { estimateRoadDistance, estimateDuration } from '@/lib/utils/haversine';
@@ -130,18 +130,18 @@ async function auditTimeWindows(
 
             if (currentTime > deadline) {
                 const delay = currentTime - deadline;
-                const isCritical = delay > 30; // Define isCritical based on delay threshold
+                const isCritical = delay > TIME_WINDOW_CONSTANTS.CRITICAL_DELAY_MINUTES;
 
-                if (delay > 30) {
+                if (isCritical) {
                     // 🚨 架构建议：严重超时（30分钟以上）列为 Critical，必须处理
                     issues.push({
                         tripId: trip.tripId,
                         type: 'time_conflict',
                         severity: 'critical',
-                        message: `${stop.order.customerName} 严重迟到 (${Math.round(delay)}分)，方案不可行。`,
+                        message: `${stop.order.customerName} 严重迟到 (${Math.round(delay)}分，超过${TIME_WINDOW_CONSTANTS.CRITICAL_DELAY_MINUTES}分钟阈值)，方案不可行。`,
                     });
                     hasCritical = true;
-                } else if (delay > 5) {
+                } else if (delay > TIME_WINDOW_CONSTANTS.WARNING_DELAY_MINUTES) {
                     // ⚠️ 架构建议：轻微超时视为"可协调"（Elastic Window）
                     // 给予警告但不阻断生成，由自愈引擎建议调整仓库作业时间
                     issues.push({

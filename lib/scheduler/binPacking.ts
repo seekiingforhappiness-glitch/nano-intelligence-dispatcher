@@ -1,6 +1,6 @@
 import { Order } from '@/types/order';
 import { VehicleConfig } from '@/types/vehicle';
-import { ScheduleOptions } from '@/types/schedule';
+import { ScheduleOptions, TIME_WINDOW_CONSTANTS } from '@/types/schedule';
 import { optimizeRoute, calculateSegmentDistances } from './routing';
 import { estimateRoadDistance, estimateDuration, haversineDistance } from '@/lib/utils/haversine';
 
@@ -389,9 +389,9 @@ async function checkTimeWindowFeasibility(
       const [endH, endM] = order.constraints.timeWindow.end.split(':').map(Number);
       const deadline = endH * 60 + (endM || 0);
 
-      // 这里的硬性跳出增加一个基础 20 分钟的 Elastic Buffer
-      // 架构决策：宁可建议架构师提前出发，也要避免由于 1 分钟的误差产生一辆 350 元的小车
-      const elasticBuffer = 20 + (tuning?.timeBuffer || 0);
+      // 使用统一的弹性缓冲时间常量，确保与审计阶段判断一致
+      // 架构决策：宁可建议提前出发，也要避免由于小误差产生额外车次
+      const elasticBuffer = TIME_WINDOW_CONSTANTS.ELASTIC_BUFFER_MINUTES + (tuning?.timeBuffer || 0);
       if (currentTime > deadline + elasticBuffer) {
         return false;
       }

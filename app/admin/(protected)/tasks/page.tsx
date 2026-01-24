@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useExponentialPolling } from '@/hooks/useExponentialPolling';
 
 interface TaskRow {
   taskId: string;
@@ -23,7 +24,7 @@ export default function AdminTasksPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -36,13 +37,17 @@ export default function AdminTasksPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    return { shouldStop: false };
   }, []);
+
+  // 使用指数退避轮询：初始 1000ms，最大 5000ms
+  // 管理员页面轮询间隔可以更长一些
+  useExponentialPolling(load, true, {
+    initialInterval: 1000,
+    maxInterval: 5000,
+    backoffMultiplier: 1.3,
+    immediate: true,
+  });
 
   return (
     <div className="space-y-4">

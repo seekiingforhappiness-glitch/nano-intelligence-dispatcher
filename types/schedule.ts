@@ -164,6 +164,54 @@ export interface ScheduleProgress {
 }
 
 /**
+ * 时间窗验证常量（统一装箱和审计阶段的判断标准）
+ */
+export const TIME_WINDOW_CONSTANTS = {
+  /** 弹性缓冲时间（分钟）：允许的轻微迟到，不触发警告 */
+  ELASTIC_BUFFER_MINUTES: 20,
+  /** 严重迟到阈值（分钟）：超过此值标记为不可行 */
+  CRITICAL_DELAY_MINUTES: 30,
+  /** 轻微迟到阈值（分钟）：超过此值但未达严重，给出警告 */
+  WARNING_DELAY_MINUTES: 5,
+} as const;
+
+/**
+ * 聚类配置预设
+ */
+export type ClusteringPreset = 'urban' | 'suburban' | 'longHaul' | 'custom';
+
+/**
+ * 聚类配置参数
+ */
+export interface ClusteringConfig {
+  preset?: ClusteringPreset;     // 预设类型
+  distanceThresholds?: number[]; // 距离分层阈值 [近, 中, 远] (km)
+  maxAngleSpan?: number;         // 极坐标扫描法最大角度跨度 (度)
+}
+
+/**
+ * 聚类预设配置
+ */
+export const CLUSTERING_PRESETS: Record<ClusteringPreset, Required<Omit<ClusteringConfig, 'preset'>>> = {
+  urban: {
+    distanceThresholds: [15, 40, 80],   // 城市配送：更密集
+    maxAngleSpan: 45,
+  },
+  suburban: {
+    distanceThresholds: [30, 80, 150],  // 城郊配送：默认
+    maxAngleSpan: 60,
+  },
+  longHaul: {
+    distanceThresholds: [50, 150, 300], // 长途干线：更分散
+    maxAngleSpan: 90,
+  },
+  custom: {
+    distanceThresholds: [30, 80, 150],
+    maxAngleSpan: 60,
+  },
+};
+
+/**
  * 调度配置选项
  */
 export interface ScheduleOptions {
@@ -174,6 +222,9 @@ export interface ScheduleOptions {
   unloadingMinutes: number;      // 每站卸货时间（分钟），包含排队等待
   costMode: 'fixed' | 'mileage' | 'weight' | 'hybrid';
   showMarketReference: boolean;
+
+  // 聚类配置
+  clustering?: ClusteringConfig;
 
   // 自愈与调优参数 (Internal)
   tuning?: {

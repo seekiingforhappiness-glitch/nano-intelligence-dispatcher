@@ -1,5 +1,4 @@
 import prisma from '@/lib/prisma';
-import { getCurrentOrganizationId } from './context';
 
 // 本地 Driver 类型定义（避免依赖 Prisma 生成的类型）
 export interface DriverRecord {
@@ -13,18 +12,29 @@ export interface DriverRecord {
     updatedAt: Date;
 }
 
-export async function listDrivers(): Promise<DriverRecord[]> {
-    const orgId = await getCurrentOrganizationId();
+/**
+ * 列出指定组织的所有司机
+ * @param organizationId 必需的组织 ID（显式传递以防止跨租户访问）
+ */
+export async function listDrivers(organizationId: string): Promise<DriverRecord[]> {
+    if (!organizationId) {
+        throw new Error('organizationId is required');
+    }
     return prisma.driver.findMany({
-        where: { organizationId: orgId },
+        where: { organizationId },
         orderBy: { createdAt: 'desc' },
     });
 }
 
-export async function getDriver(id: string): Promise<DriverRecord | null> {
-    const orgId = await getCurrentOrganizationId();
+/**
+ * 获取指定组织的单个司机
+ */
+export async function getDriver(id: string, organizationId: string): Promise<DriverRecord | null> {
+    if (!organizationId) {
+        throw new Error('organizationId is required');
+    }
     return prisma.driver.findFirst({
-        where: { id, organizationId: orgId },
+        where: { id, organizationId },
     });
 }
 
@@ -35,21 +45,35 @@ export interface DriverInput {
     status?: string;
 }
 
-export async function createDriver(input: DriverInput): Promise<DriverRecord> {
-    const orgId = await getCurrentOrganizationId();
+/**
+ * 创建司机
+ */
+export async function createDriver(input: DriverInput, organizationId: string): Promise<DriverRecord> {
+    if (!organizationId) {
+        throw new Error('organizationId is required');
+    }
     return prisma.driver.create({
         data: {
             ...input,
-            organizationId: orgId,
+            organizationId,
         },
     });
 }
 
-export async function updateDriver(id: string, input: Partial<DriverInput>): Promise<DriverRecord | null> {
-    const orgId = await getCurrentOrganizationId();
+/**
+ * 更新司机
+ */
+export async function updateDriver(
+    id: string,
+    input: Partial<DriverInput>,
+    organizationId: string
+): Promise<DriverRecord | null> {
+    if (!organizationId) {
+        throw new Error('organizationId is required');
+    }
     try {
         return await prisma.driver.update({
-            where: { id, organizationId: orgId },
+            where: { id, organizationId },
             data: input,
         });
     } catch (e) {
@@ -57,11 +81,16 @@ export async function updateDriver(id: string, input: Partial<DriverInput>): Pro
     }
 }
 
-export async function deleteDriver(id: string): Promise<void> {
-    const orgId = await getCurrentOrganizationId();
+/**
+ * 删除司机
+ */
+export async function deleteDriver(id: string, organizationId: string): Promise<void> {
+    if (!organizationId) {
+        throw new Error('organizationId is required');
+    }
     try {
         await prisma.driver.delete({
-            where: { id, organizationId: orgId },
+            where: { id, organizationId },
         });
     } catch (e) {
         // Ignore error

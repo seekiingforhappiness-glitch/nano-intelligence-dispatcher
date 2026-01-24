@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Truck, Zap, MapPin } from 'lucide-react';
 import { FileUploader, ProgressPanel, ResultDashboard, AdvancedSettings, FieldMappingPanel } from '@/components';
 import { ScheduleResult, ScheduleProgress } from '@/types/schedule';
@@ -8,6 +8,7 @@ import { VehicleConfig } from '@/types/vehicle';
 import { FieldMapping } from '@/types/order';
 import { defaultVehicles } from '@/config';
 import { useTaskStore } from '@/store/useTaskStore';
+import { useExponentialPolling } from '@/hooks/useExponentialPolling';
 
 interface Warehouse {
   id: string;
@@ -212,38 +213,57 @@ export default function TasksPage() {
     selectedWarehouseId,
   ]);
 
-  useEffect(() => {
-    if (!taskId || state !== 'processing') return;
+  // 使用指数退避轮询：初始 500ms，最大 3000ms
+  // 进度更新时保持快速轮询，长时间无变化时逐渐放缓
+  const lastProgressRef = useRef<number>(0);
 
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/schedule?taskId=${taskId}`);
-        const data = await response.json();
+  const pollCallback = useCallback(async () => {
+    if (!taskId) return { shouldStop: true };
 
-        if (data.progress) {
-          setProgress(data.progress);
-          saveTaskProgress(data.progress);
-        }
+    try {
+      const response = await fetch(`/api/schedule?taskId=${taskId}`);
+      const data = await response.json();
+
+      if (data.progress) {
+        setProgress(data.progress);
+        saveTaskProgress(data.progress);
+
+        // 进度有变化时重置间隔以保持响应性
+        const currentPercent = data.progress.percent || 0;
+        const shouldReset = currentPercent !== lastProgressRef.current;
+        lastProgressRef.current = currentPercent;
 
         if (data.status === 'completed' && data.result) {
           setResult(data.result);
           setState('completed');
           saveTaskResult({ taskId: data.taskId, result: data.result });
-          clearInterval(pollInterval);
-        } else if (data.status === 'failed') {
+          return { shouldStop: true };
+        }
+
+        if (data.status === 'failed') {
           const msg = data.error || '调度失败';
           setError(msg);
           saveTaskError(msg);
           setState('error');
-          clearInterval(pollInterval);
+          return { shouldStop: true };
         }
-      } catch (err) {
-        console.error('轮询失败:', err);
-      }
-    }, 1000);
 
-    return () => clearInterval(pollInterval);
-  }, [taskId, state, saveTaskProgress, saveTaskResult, saveTaskError]);
+        return { shouldStop: false, resetInterval: shouldReset };
+      }
+
+      return { shouldStop: false };
+    } catch (err) {
+      console.error('轮询失败:', err);
+      return { shouldStop: false };
+    }
+  }, [taskId, saveTaskProgress, saveTaskResult, saveTaskError]);
+
+  useExponentialPolling(pollCallback, state === 'processing' && !!taskId, {
+    initialInterval: 500,
+    maxInterval: 3000,
+    backoffMultiplier: 1.5,
+    immediate: true,
+  });
 
   const handleDownload = useCallback(async () => {
     if (!result) return;

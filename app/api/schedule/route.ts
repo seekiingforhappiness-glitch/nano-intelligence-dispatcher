@@ -9,6 +9,7 @@ import { ScheduleProgress } from '@/types/schedule';
 import { CostMode, VehicleConfig } from '@/types/vehicle';
 import { initTask, updateTask, getTask } from '@/lib/store/taskStore';
 import { listWarehouses, WarehouseRecord } from '@/lib/server/warehouses';
+import { requireAuth, AuthError } from '@/lib/server/authMiddleware';
 
 type WeightFallbackMode = 'disabled' | 'quantity_times_package_size';
 
@@ -75,6 +76,20 @@ function applyWeightFallback(rawOrders: RawOrder[], mode: WeightFallbackMode): v
 }
 
 export async function POST(request: NextRequest) {
+  // 验证用户身份
+  let auth;
+  try {
+    auth = requireAuth(request);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+    return NextResponse.json({ error: '认证失败' }, { status: 401 });
+  }
+
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -105,7 +120,7 @@ export async function POST(request: NextRequest) {
     });
 
     // 异步执行调度（不阻塞响应）
-    processSchedule(taskId, file, sheetName, fieldMapping, options, vehicles, { warehouseId });
+    processSchedule(taskId, file, sheetName, fieldMapping, options, vehicles, { warehouseId }, auth.organizationId);
 
     return NextResponse.json({
       success: true,
@@ -128,7 +143,8 @@ async function processSchedule(
   fieldMapping: FieldMapping,
   options: ScheduleFormOptions,
   vehicles: VehicleConfig[],
-  warehouseConfig: WarehouseScheduleConfig
+  warehouseConfig: WarehouseScheduleConfig,
+  organizationId: string
 ) {
   const task = await getTask(taskId);
   if (!task) return;
@@ -195,7 +211,7 @@ async function processSchedule(
       throw new Error(hint);
     }
 
-    const allWarehouses = await listWarehouses();
+    const allWarehouses = await listWarehouses(organizationId);
     const resolvedWarehouse = resolveSingleWarehouse(warehouseConfig.warehouseId, allWarehouses);
     const warehouseLabel = resolvedWarehouse?.name || getDepotConfig().name;
     const singleResult = await runSingleWarehouseSchedule(

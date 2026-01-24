@@ -76,15 +76,17 @@ model Driver {
   phone          String?
   licenseType    String?
   status         String       @default("active") // active, inactive
-  
+
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  
+
   shipments      Shipment[]
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  @@index([organizationId])
+  @@index([organizationId, status])
   @@map("drivers")
 }
 
@@ -95,16 +97,18 @@ model Vehicle {
   capacityWeight Float?
   capacityVolume Float?
   status         String       @default("idle") // idle, busy, maintenance
-  
+
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  
+
   shipments      Shipment[]
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, plateNumber])
+  @@index([organizationId])
+  @@index([organizationId, status])
   @@map("vehicles")
 }
 
@@ -122,16 +126,19 @@ model Order {
   timeWindow     String?
   requirements   String?      // JSON or text
   status         String       @default("pending") // pending, scheduled, completed, failed
-  
+
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  
+
   shipmentItems  ShipmentOrder[]
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, orderNumber])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, deliveryDate])
   @@map("orders")
 }
 
@@ -146,13 +153,16 @@ model Task {
   result         Json?        // Full schedule result
   error          String?
   meta           Json?        // Configuration used
-  
+
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
   @@map("tasks")
 }
 

@@ -1,5 +1,4 @@
 import prisma from '@/lib/prisma';
-import { getCurrentOrganizationId } from './context';
 import { getDepotConfig } from '@/config/depot';
 
 // 本地 Warehouse 类型定义（避免依赖 Prisma 生成的类型）
@@ -20,46 +19,53 @@ export interface WarehouseRecord {
   updatedAt: Date;
 }
 
-// Prisma JSON 类型替代
-const JsonNull = null as any;
-
 /**
  * 获取仓库列表
- * @param orgIdOverride 可选的组织 ID（由 API 层传递）
+ * @param organizationId 必需的组织 ID（显式传递以防止跨租户访问）
  */
-export async function listWarehouses(orgIdOverride?: string): Promise<WarehouseRecord[]> {
-  const orgId = orgIdOverride || await getCurrentOrganizationId();
+export async function listWarehouses(organizationId: string): Promise<WarehouseRecord[]> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
 
   try {
     const warehouses = await prisma.warehouse.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId },
       orderBy: { createdAt: 'asc' },
     });
 
     if (warehouses.length === 0) {
       // Seed default warehouse if none exists
-      return await seedDefaultWarehouse(orgId);
+      return await seedDefaultWarehouse(organizationId);
     }
     return warehouses;
   } catch (error) {
     console.error('listWarehouses error:', error);
-    // 如果查询失败（可能是表不存在），吞掉错误返回空或尝试种子（种子内部会处理表逻辑）
     return [];
   }
 }
 
-export async function getWarehouse(id: string): Promise<WarehouseRecord | null> {
-  // We should ideally restrict by orgId too for security
-  const orgId = await getCurrentOrganizationId();
+/**
+ * 获取单个仓库
+ */
+export async function getWarehouse(id: string, organizationId: string): Promise<WarehouseRecord | null> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
   return prisma.warehouse.findFirst({
-    where: { id, organizationId: orgId },
+    where: { id, organizationId },
   });
 }
 
-export async function getWarehouseByCode(code: string): Promise<WarehouseRecord | null> {
-  const orgId = await getCurrentOrganizationId();
+/**
+ * 按代码获取仓库
+ */
+export async function getWarehouseByCode(code: string, organizationId: string): Promise<WarehouseRecord | null> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
   return prisma.warehouse.findFirst({
-    where: { code, organizationId: orgId },
+    where: { code, organizationId },
   });
 }
 
@@ -79,11 +85,13 @@ export interface WarehouseInput {
 /**
  * 创建或更新仓库
  */
-export async function createWarehouse(input: WarehouseInput, orgIdOverride?: string): Promise<WarehouseRecord> {
-  const orgId = orgIdOverride || await getCurrentOrganizationId();
+export async function createWarehouse(input: WarehouseInput, organizationId: string): Promise<WarehouseRecord> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
 
   // 确保组织存在（关键：防止外键约束失败）
-  await ensureOrganizationExists(orgId);
+  await ensureOrganizationExists(organizationId);
 
   // Default code if missing
   const code = input.code?.trim() || Math.random().toString(36).substr(2, 8).toUpperCase();
@@ -91,7 +99,7 @@ export async function createWarehouse(input: WarehouseInput, orgIdOverride?: str
   return prisma.warehouse.upsert({
     where: {
       organizationId_code: {
-        organizationId: orgId,
+        organizationId,
         code: code
       }
     },
@@ -107,7 +115,7 @@ export async function createWarehouse(input: WarehouseInput, orgIdOverride?: str
       active: input.active ?? true,
     },
     create: {
-      organizationId: orgId,
+      organizationId,
       code: code,
       name: input.name.trim(),
       address: input.address.trim(),
@@ -122,17 +130,30 @@ export async function createWarehouse(input: WarehouseInput, orgIdOverride?: str
   });
 }
 
-export async function updateWarehouse(id: string, input: Partial<WarehouseInput>): Promise<WarehouseRecord | null> {
-  const orgId = await getCurrentOrganizationId();
+/**
+ * 更新仓库
+ */
+export async function updateWarehouse(
+  id: string,
+  input: Partial<WarehouseInput>,
+  organizationId: string
+): Promise<WarehouseRecord | null> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
+
+  // 验证仓库属于该组织
+  const existing = await prisma.warehouse.findFirst({
+    where: { id, organizationId },
+  });
+
+  if (!existing) {
+    return null;
+  }
 
   try {
     return await prisma.warehouse.update({
-      where: {
-        id,
-        // Prisma update constraints usually only work on ID, but we should verify ownership
-        // Ideally we check existence first or use updateMany (which doesn't return the record in all providers)
-        // Since ID is UUID, collision is unlikely, but good practice to check logic:
-      },
+      where: { id },
       data: {
         code: input.code?.trim(),
         name: input.name?.trim(),
@@ -151,8 +172,23 @@ export async function updateWarehouse(id: string, input: Partial<WarehouseInput>
   }
 }
 
-export async function deleteWarehouse(id: string): Promise<void> {
-  // const orgId = await getCurrentOrganizationId();
+/**
+ * 删除仓库
+ */
+export async function deleteWarehouse(id: string, organizationId: string): Promise<void> {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
+
+  // 验证仓库属于该组织
+  const existing = await prisma.warehouse.findFirst({
+    where: { id, organizationId },
+  });
+
+  if (!existing) {
+    return;
+  }
+
   try {
     await prisma.warehouse.delete({
       where: { id }
@@ -163,11 +199,10 @@ export async function deleteWarehouse(id: string): Promise<void> {
 }
 
 async function ensureOrganizationExists(orgId: string): Promise<void> {
-  // Try to create the organization if it doesn't exist
   try {
     await prisma.organization.upsert({
       where: { id: orgId },
-      update: {}, // No updates needed if exists
+      update: {},
       create: {
         id: orgId,
         name: '默认组织',
@@ -175,7 +210,6 @@ async function ensureOrganizationExists(orgId: string): Promise<void> {
       },
     });
   } catch (e) {
-    // If upsert fails (e.g., slug conflict), try to find existing or create with unique slug
     const existing = await prisma.organization.findUnique({ where: { id: orgId } });
     if (!existing) {
       await prisma.organization.create({
@@ -190,7 +224,6 @@ async function ensureOrganizationExists(orgId: string): Promise<void> {
 }
 
 async function seedDefaultWarehouse(orgId: string): Promise<WarehouseRecord[]> {
-  // Ensure the organization exists before creating warehouse
   await ensureOrganizationExists(orgId);
 
   const depot = getDepotConfig();
@@ -205,9 +238,6 @@ async function seedDefaultWarehouse(orgId: string): Promise<WarehouseRecord[]> {
     capacity: null,
     notes: '系统默认仓',
     active: true,
-  });
+  }, orgId);
   return [warehouse];
 }
-
-
-

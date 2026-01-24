@@ -1,5 +1,5 @@
 import { Order } from '@/types/order';
-import { ScheduleOptions } from '@/types/schedule';
+import { ScheduleOptions, ClusteringConfig, CLUSTERING_PRESETS } from '@/types/schedule';
 import { calculateAngle, haversineDistance } from '@/lib/utils/haversine';
 
 /**
@@ -15,13 +15,30 @@ export interface OrderCluster {
 }
 
 /**
+ * 获取聚类配置（合并预设和自定义配置）
+ */
+function resolveClusteringConfig(config?: ClusteringConfig): Required<Omit<ClusteringConfig, 'preset'>> {
+  const preset = config?.preset || 'suburban';
+  const presetConfig = CLUSTERING_PRESETS[preset];
+
+  return {
+    distanceThresholds: config?.distanceThresholds || presetConfig.distanceThresholds,
+    maxAngleSpan: config?.maxAngleSpan || presetConfig.maxAngleSpan,
+  };
+}
+
+/**
  * 极坐标扫描法分组
  * 将订单按照相对仓库的角度和距离进行分组
+ *
+ * @param orders 订单列表
+ * @param depotCoord 仓库坐标
+ * @param maxAngleSpan 每组最大角度跨度（可配置）
  */
 export function clusterOrdersBySweep(
   orders: Order[],
   depotCoord: { lng: number; lat: number },
-  maxAngleSpan: number = 60  // 每组最大角度跨度
+  maxAngleSpan: number = 60
 ): OrderCluster[] {
   if (orders.length === 0) return [];
 
@@ -96,12 +113,16 @@ function createCluster(
 }
 
 /**
- * 按距离远近分组
+ * 按距离远近分组（支持可配置阈值）
+ *
+ * @param orders 订单列表
+ * @param depotCoord 仓库坐标
+ * @param distanceThresholds 距离分层阈值 [近, 中, 远] (km)
  */
 export function clusterOrdersByDistance(
   orders: Order[],
   depotCoord: { lng: number; lat: number },
-  distanceThresholds: number[] = [30, 80, 150]  // 公里
+  distanceThresholds: number[] = [30, 80, 150]
 ): OrderCluster[] {
   const ordersWithDistance = orders
     .filter(o => o.coordinates)
@@ -116,9 +137,10 @@ export function clusterOrdersByDistance(
     }));
 
   const clusters: OrderCluster[] = [];
+  const [nearThreshold, midThreshold, farThreshold] = distanceThresholds;
 
-  // 近距离（0-30km）
-  const near = ordersWithDistance.filter(o => o.distance <= distanceThresholds[0]);
+  // 近距离
+  const near = ordersWithDistance.filter(o => o.distance <= nearThreshold);
   if (near.length > 0) {
     clusters.push({
       id: 'NEAR',
@@ -130,9 +152,9 @@ export function clusterOrdersByDistance(
     });
   }
 
-  // 中距离（30-80km）
+  // 中距离
   const mid = ordersWithDistance.filter(
-    o => o.distance > distanceThresholds[0] && o.distance <= distanceThresholds[1]
+    o => o.distance > nearThreshold && o.distance <= midThreshold
   );
   if (mid.length > 0) {
     clusters.push({
@@ -145,9 +167,9 @@ export function clusterOrdersByDistance(
     });
   }
 
-  // 远距离（80-150km）
+  // 远距离
   const far = ordersWithDistance.filter(
-    o => o.distance > distanceThresholds[1] && o.distance <= distanceThresholds[2]
+    o => o.distance > midThreshold && o.distance <= farThreshold
   );
   if (far.length > 0) {
     clusters.push({
@@ -160,8 +182,8 @@ export function clusterOrdersByDistance(
     });
   }
 
-  // 超远距离（>150km）
-  const veryFar = ordersWithDistance.filter(o => o.distance > distanceThresholds[2]);
+  // 超远距离
+  const veryFar = ordersWithDistance.filter(o => o.distance > farThreshold);
   if (veryFar.length > 0) {
     clusters.push({
       id: 'VERY_FAR',
@@ -178,6 +200,11 @@ export function clusterOrdersByDistance(
 
 /**
  * 综合分组策略：先按方向，再按距离
+ * 支持可配置的聚类参数
+ *
+ * @param orders 订单列表
+ * @param depotCoord 仓库坐标
+ * @param options 调度选项（包含聚类配置）
  */
 export function clusterOrders(
   orders: Order[],
@@ -185,12 +212,85 @@ export function clusterOrders(
   options?: ScheduleOptions
 ): OrderCluster[] {
   const tuning = options?.tuning;
-  // 🎯 架构联动：根据 clusterBias 动态调整分组广度
+  const clusterConfig = resolveClusteringConfig(options?.clustering);
+
+  // 根据 clusterBias 动态调整分组广度
   // clusterBias 默认为 0，范围通常在 0-1 之间
-  const dynamicSpan = 90 + (tuning?.clusterBias || 0) * 180;
+  const biasMultiplier = 1 + (tuning?.clusterBias || 0) * 2;
+  const dynamicSpan = clusterConfig.maxAngleSpan * biasMultiplier;
 
   // 使用极坐标扫描法，动态扩大跨度以利于干线/大车拼单
   return clusterOrdersBySweep(orders, depotCoord, Math.min(360, dynamicSpan));
 }
 
+/**
+ * 混合聚类策略：先按距离分层，再按方向细分
+ * 适合大规模订单场景
+ */
+export function clusterOrdersHybrid(
+  orders: Order[],
+  depotCoord: { lng: number; lat: number },
+  options?: ScheduleOptions
+): OrderCluster[] {
+  const clusterConfig = resolveClusteringConfig(options?.clustering);
 
+  // 第一步：按距离分层
+  const distanceClusters = clusterOrdersByDistance(
+    orders,
+    depotCoord,
+    clusterConfig.distanceThresholds
+  );
+
+  // 第二步：对每个距离层再按方向细分
+  const result: OrderCluster[] = [];
+  let clusterIndex = 0;
+
+  for (const distCluster of distanceClusters) {
+    if (distCluster.orders.length <= 3) {
+      // 订单数太少，不再细分
+      result.push({
+        ...distCluster,
+        id: `C${String(++clusterIndex).padStart(2, '0')}`,
+      });
+    } else {
+      // 按方向细分
+      const subClusters = clusterOrdersBySweep(
+        distCluster.orders,
+        depotCoord,
+        clusterConfig.maxAngleSpan
+      );
+      for (const sub of subClusters) {
+        result.push({
+          ...sub,
+          id: `${distCluster.id}_${sub.id}`,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 获取聚类统计信息
+ */
+export function getClusteringStats(clusters: OrderCluster[]): {
+  totalClusters: number;
+  totalOrders: number;
+  avgOrdersPerCluster: number;
+  avgClusterDistance: number;
+} {
+  const totalClusters = clusters.length;
+  const totalOrders = clusters.reduce((sum, c) => sum + c.orders.length, 0);
+  const avgOrdersPerCluster = totalClusters > 0 ? totalOrders / totalClusters : 0;
+  const avgClusterDistance = totalClusters > 0
+    ? clusters.reduce((sum, c) => sum + c.avgDistance, 0) / totalClusters
+    : 0;
+
+  return {
+    totalClusters,
+    totalOrders,
+    avgOrdersPerCluster: Math.round(avgOrdersPerCluster * 10) / 10,
+    avgClusterDistance: Math.round(avgClusterDistance * 10) / 10,
+  };
+}
